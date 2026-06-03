@@ -36,7 +36,9 @@ def _get_auth_config(integration: Integration) -> AuthenticateConfig:
 
 def _track_no_for(subject_key: str) -> int:
     # Stable across process restarts (Python's built-in hash is salted per-process).
-    digest = hashlib.md5(subject_key.encode("utf-8")).hexdigest()
+    # Not cryptographic — sha256 is just used as a deterministic, well-distributed
+    # source of bits for the trackNo identifier.
+    digest = hashlib.sha256(subject_key.encode("utf-8")).hexdigest()
     return int(digest[:14], 16)  # 56 bits, fits comfortably in C-more's 64-bit signed int
 
 
