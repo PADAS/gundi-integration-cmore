@@ -114,6 +114,13 @@ class CmoreClient:
         return _safe_json(response, [])
 
     @retry_transient
+    async def get_classification_tree(self) -> list:
+        """Fetch the valid battleDimension/force/type/role combinations for this instance."""
+        response = await self._client.get("/v2/clients/get_classification_tree")
+        response.raise_for_status()
+        return _safe_json(response, [])
+
+    @retry_transient
     async def create_gnodes(self, clients: List[CmoreVirtualClientRequest]) -> List[CmoreGNode]:
         payload = [c.dict(exclude_none=True) for c in clients]
         response = await self._client.post("/v2/clients/virtual", json=payload)

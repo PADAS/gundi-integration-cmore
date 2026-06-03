@@ -20,6 +20,19 @@ class Affiliation(str, Enum):
     NEUTRAL = "Neutral"
 
 
+class CmoreClassification(BaseModel):
+    """MIL2525b-based client classification — drives the icon rendered on the C-more map.
+
+    Valid values are instance-specific (GET /v2/clients/get_classification_tree);
+    plain strings are used here instead of enums so custom trees keep working.
+    Unspecified fields default to UNKNOWN server-side.
+    """
+    battleDimension: Optional[str] = None
+    force: Optional[str] = None
+    type: Optional[str] = None
+    role: Optional[str] = None
+
+
 class CmoreLocation(BaseModel):
     clientId: int
     latitude: float
@@ -74,6 +87,8 @@ class CmoreVirtualClientRequest(BaseModel):
     targetId: Optional[str] = None
     callsign: Optional[str] = None
     affiliation: Affiliation = Affiliation.UNKNOWN
+    trackSourceType: Optional[str] = None
+    classification: Optional[CmoreClassification] = None
 
 
 class CmoreGNode(BaseModel):

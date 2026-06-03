@@ -148,7 +148,7 @@ def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=No
     inner.post_properties = AsyncMock(return_value={"status": "ok"})
     inner.get_gateway_mapping = AsyncMock(return_value=[])
     inner.create_gnodes = AsyncMock(
-        return_value=[MagicMock(clientId=8888)]
+        return_value=[MagicMock(clientId=8888, error=None)]
     )
 
     cm = MagicMock()
@@ -335,6 +335,87 @@ async def test_transformations_applied_before_event_dispatch(
     posted = inner.post_event.await_args[0][0]
     assert posted.tags is not None
     assert posted.tags[0].tagId == 42  # lion → lion_sighting → 42
+
+
+@pytest.mark.asyncio
+async def test_deliver_creates_gnode_with_mapped_affiliation_and_classification(
+    mocker, integration, provider_info, observation, metadata
+):
+    from app.actions.configurations import DeliverConfig
+    from app.actions.handlers import action_deliver
+    from app.datasource.schemas import Affiliation, CmoreClassification
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)  # no cached client_id → GNode gets created
+    _patch_activity_logger(mocker)
+
+    config = DeliverConfig(
+        subject_type_to_affiliation={"elephant": Affiliation.NEUTRAL},
+        subject_type_to_classification={
+            "elephant": CmoreClassification(battleDimension="LAND", force="NONMILITARY")
+        },
+    )
+    delivery = GundiDelivery(payload=observation, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    inner.create_gnodes.assert_awaited_once()
+    request = inner.create_gnodes.await_args[0][0][0]
+    assert request.callsign == "Collar 42"
+    assert request.targetId == "device-42"
+    assert request.trackSourceType == provider_info.provider_type
+    assert request.affiliation == Affiliation.NEUTRAL
+    assert request.classification.battleDimension == "LAND"
+    assert request.classification.force == "NONMILITARY"
+
+
+@pytest.mark.asyncio
+async def test_deliver_subject_subtype_takes_precedence_over_subject_type(
+    mocker, integration, provider_info, observation, metadata
+):
+    from app.actions.configurations import DeliverConfig
+    from app.actions.handlers import action_deliver
+    from app.datasource.schemas import Affiliation
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    observation.additional = {"subject_subtype": "ranger"}
+    config = DeliverConfig(
+        subject_type_to_affiliation={
+            "ranger": Affiliation.FRIENDLY,
+            "elephant": Affiliation.NEUTRAL,
+        },
+    )
+    delivery = GundiDelivery(payload=observation, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    request = inner.create_gnodes.await_args[0][0][0]
+    assert request.affiliation == Affiliation.FRIENDLY
+
+
+@pytest.mark.asyncio
+async def test_deliver_uses_default_affiliation_when_subject_unmapped(
+    mocker, integration, provider_info, observation, metadata
+):
+    from app.actions.configurations import DeliverConfig
+    from app.actions.handlers import action_deliver
+    from app.datasource.schemas import Affiliation
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    config = DeliverConfig(
+        default_affiliation=Affiliation.FRIENDLY,
+        subject_type_to_affiliation={"lion": Affiliation.NEUTRAL},
+    )
+    delivery = GundiDelivery(payload=observation, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    request = inner.create_gnodes.await_args[0][0][0]
+    assert request.affiliation == Affiliation.FRIENDLY
+    assert request.classification is None
 
 
 @pytest.mark.asyncio
