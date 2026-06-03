@@ -25,6 +25,7 @@ def _giveup_on_client_error(exc: Exception) -> bool:
     return (
         isinstance(exc, httpx.HTTPStatusError)
         and 400 <= exc.response.status_code < 500
+        and exc.response.status_code not in (408, 429)
     )
 
 
