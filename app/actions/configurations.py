@@ -32,20 +32,45 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     )
 
 
+class CmoreTagMapping(pydantic.BaseModel):
+    """Map a Gundi event_type to a CMORE tag (by name) and its fields."""
+
+    tag_name: str = FieldWithUIOptions(
+        ...,
+        title="CMORE Tag Name",
+        description=(
+            "Name of the CMORE tag to attach to events of this type "
+            "(e.g., 'Poacher Sighting'). Resolved to a tagId at runtime via "
+            "CMORE's /v2/tags/getfull endpoint."
+        ),
+    )
+    field_mappings: Dict[str, str] = FieldWithUIOptions(
+        default_factory=dict,
+        title="Field Mappings",
+        description=(
+            "Map of Gundi event_details keys to CMORE field names within the "
+            "chosen tag. Values are stringified before sending. For Lookup-typed "
+            "CMORE fields, event_details should already contain the CMORE-valid "
+            "string (e.g., 'N to S' for a Direction field)."
+        ),
+    )
+
+
 class DeliverConfig(PushActionConfiguration):
     """Combined config for the single action_deliver handler.
 
     Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
-    (event_type_to_tag_id) into one config since one handler now dispatches on
-    payload type internally.
+    into one config since one handler now dispatches on payload type internally.
     """
 
-    event_type_to_tag_id: Optional[Dict[str, int]] = FieldWithUIOptions(
+    event_type_to_tag: Optional[Dict[str, CmoreTagMapping]] = FieldWithUIOptions(
         None,
-        title="Event type → C-more tag ID",
+        title="Event type → CMORE tag",
         description=(
-            "Optional mapping from event_type to C-more tagId. "
-            "When an event arrives whose event_type is in this map, the matching tag is attached."
+            "Optional mapping from Gundi event_type to a CMORE tag + field "
+            "mappings. Events whose event_type is not in this map are still "
+            "posted to CMORE with description + location, but without a "
+            "structured tag attached."
         ),
     )
     default_affiliation: Affiliation = FieldWithUIOptions(
