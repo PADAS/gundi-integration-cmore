@@ -35,6 +35,18 @@ retry_transient = backoff.on_exception(
 )
 
 
+def _safe_json(response: httpx.Response, default):
+    """Return response.json() unless the body is empty.
+
+    C-more's write endpoints (POST /properties, POST /locations, etc.) return
+    2xx with an empty body on success. Calling .json() on that raises
+    JSONDecodeError. Use this helper to return a sensible default instead.
+    """
+    if not response.content:
+        return default
+    return response.json()
+
+
 class CmoreClient:
     def __init__(self, base_url: str, token: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT):
         headers = {"Content-Type": "application/json"}
@@ -72,45 +84,45 @@ class CmoreClient:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         response.raise_for_status()
-        return response.json()
+        return _safe_json(response, {})
 
     @retry_transient
     async def post_locations(self, locations: List[CmoreLocation]) -> dict:
         payload = [json.loads(loc.json(exclude_none=True)) for loc in locations]
         response = await self._client.post("/v2/clients/virtual/locations", json=payload)
         response.raise_for_status()
-        return response.json()
+        return _safe_json(response, {})
 
     @retry_transient
     async def post_properties(self, properties: List[CmoreProperty]) -> dict:
         payload = [prop.dict() for prop in properties]
         response = await self._client.post("/v2/clients/virtual/properties", json=payload)
         response.raise_for_status()
-        return response.json()
+        return _safe_json(response, {})
 
     @retry_transient
     async def post_event(self, event: CmoreEvent) -> dict:
         payload = json.loads(event.json(exclude_none=True))
         response = await self._client.post("/v2/messages/events", json=payload)
         response.raise_for_status()
-        return response.json()
+        return _safe_json(response, {})
 
     @retry_transient
     async def get_tags(self) -> list:
         response = await self._client.get("/v2/tags/getfull")
         response.raise_for_status()
-        return response.json()
+        return _safe_json(response, [])
 
     @retry_transient
     async def create_gnodes(self, clients: List[CmoreVirtualClientRequest]) -> List[CmoreGNode]:
         payload = [c.dict(exclude_none=True) for c in clients]
         response = await self._client.post("/v2/clients/virtual", json=payload)
         response.raise_for_status()
-        return [CmoreGNode(**item) for item in response.json()]
+        return [CmoreGNode(**item) for item in _safe_json(response, [])]
 
     @retry_transient
     async def get_gateway_mapping(self) -> List[CmoreGatewayMapping]:
         """Fetch existing trackSource/trackNo → clientId mappings for this token's application client."""
         response = await self._client.get("/v2/clients/virtual/gateway_mapping")
         response.raise_for_status()
-        return [CmoreGatewayMapping(**item) for item in response.json()]
+        return [CmoreGatewayMapping(**item) for item in _safe_json(response, [])]
