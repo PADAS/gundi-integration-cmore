@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TrackType(str, Enum):
@@ -45,7 +45,7 @@ class CmoreTagValue(BaseModel):
 
 class CmoreEventTag(BaseModel):
     tagId: int
-    values: List[CmoreTagValue] = []
+    values: List[CmoreTagValue] = Field(default_factory=list)
 
 
 class UploadType(str, Enum):

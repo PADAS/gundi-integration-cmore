@@ -17,12 +17,19 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_TIMEOUT = 10.0
+
+
 class CmoreClient:
-    def __init__(self, base_url: str, token: Optional[str] = None):
+    def __init__(self, base_url: str, token: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT):
         headers = {"Content-Type": "application/json"}
         if token:
-            headers["Authorization"] = f"Token {token}"
-        self._client = httpx.AsyncClient(base_url=base_url, headers=headers)
+            # Tolerate tokens that already include the "Token " prefix.
+            raw = token.strip()
+            if raw.lower().startswith("token "):
+                raw = raw[6:].strip()
+            headers["Authorization"] = f"Token {raw}"
+        self._client = httpx.AsyncClient(base_url=base_url, headers=headers, timeout=timeout)
 
     async def __aenter__(self):
         return self

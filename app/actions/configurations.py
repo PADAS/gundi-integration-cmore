@@ -9,7 +9,10 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     token: pydantic.SecretStr = FieldWithUIOptions(
         ...,
         title="API Token",
-        description="C-more API token. Must be prefixed with 'Token' in the Authorization header.",
+        description=(
+            "C-more API token (raw value, without the 'Token ' prefix). "
+            "The client adds the 'Token ' prefix to the Authorization header automatically."
+        ),
         ui_options=UIOptions(widget="password"),
     )
     base_url: str = FieldWithUIOptions(

@@ -27,6 +27,15 @@ from .schemas import (
 DEFAULT_BASE_URL = "https://cmorewc1.chpc.ac.za/za/WebAPI/api"
 
 
+def _parse_iso(ts: str) -> datetime:
+    """Parse an ISO-8601 timestamp, accepting the 'Z' UTC suffix.
+
+    Python 3.10's datetime.fromisoformat() doesn't accept a trailing 'Z',
+    which is otherwise valid ISO-8601. Normalize it to '+00:00' first.
+    """
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -151,7 +160,7 @@ def create_gnode(ctx, track_no, track_source, track_type, callsign, target_id, a
 def post_location(ctx, client_id, lat, lon, timestamp, altitude, accuracy, heading, speed, source):
     """Post a GPS location for a GNode."""
     _require_token(ctx)
-    ts = datetime.fromisoformat(timestamp) if timestamp else datetime.now(tz=timezone.utc)
+    ts = _parse_iso(timestamp) if timestamp else datetime.now(tz=timezone.utc)
     location = CmoreLocation(
         clientId=client_id,
         latitude=lat,
@@ -214,7 +223,7 @@ def post_event(ctx, description, lat, lon, altitude, accuracy, date_occurred, ow
         longitude=lon,
         altitude=altitude,
         accuracy=accuracy,
-        dateOccurred=datetime.fromisoformat(date_occurred) if date_occurred else None,
+        dateOccurred=_parse_iso(date_occurred) if date_occurred else None,
         uploadType=UploadType(upload_type),
         ownerGroupId=owner_group_id,
     )
