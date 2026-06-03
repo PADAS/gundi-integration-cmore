@@ -1,7 +1,7 @@
 FROM python:3.10-slim AS baseimage
 
 # This command is for webhooks support
-RUN apt-get update && apt-get install -y autoconf automake libtool make python3-dev
+RUN apt-get update && apt-get install -y autoconf automake libtool make python3-dev git
 
 WORKDIR /code
 
