@@ -2,8 +2,10 @@ import hashlib
 import logging
 import traceback
 
+from gundi_core import schemas
+from gundi_core.events import GundiDelivery
 from gundi_core.schemas.v2 import Integration, LogLevel
-from gundi_core.events.transformers import EventTransformedER, ObservationTransformedER
+from gundi_client_v2.transformations import apply_transformations
 
 from app.datasource.client import CmoreClient
 from app.datasource.schemas import (
@@ -16,7 +18,7 @@ from app.datasource.schemas import (
 )
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, PushEventsConfig, PushObservationsConfig
+from .configurations import AuthenticateConfig, DeliverConfig
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
     """Return (client_id, was_created) for a subject, looking up or creating a GNode in Cmore."""
     state = await state_manager.get_state(
         integration_id=integration_id,
-        action_id="push_observations",
+        action_id="deliver",
         source_id=subject_key,
     )
     if state.get("client_id"):
@@ -68,7 +70,7 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
         if mapping.trackSource == TRACK_SOURCE and mapping.trackNo == track_no:
             await state_manager.set_state(
                 integration_id=integration_id,
-                action_id="push_observations",
+                action_id="deliver",
                 state={"client_id": mapping.clientId},
                 source_id=subject_key,
             )
@@ -84,7 +86,7 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
     client_id = gnodes[0].clientId
     await state_manager.set_state(
         integration_id=integration_id,
-        action_id="push_observations",
+        action_id="deliver",
         state={"client_id": client_id},
         source_id=subject_key,
     )
@@ -92,52 +94,54 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
     return client_id, True
 
 
-def _subject_properties(client_id: int, observation) -> list:
-    properties = []
-    for name, value in [
-        ("subject_name", observation.subject_name),
+def _subject_properties(client_id: int, observation: schemas.v2.Observation) -> list:
+    additional = observation.additional or {}
+    candidates = [
+        ("subject_name", observation.source_name),
         ("subject_type", observation.subject_type),
-        ("subject_subtype", observation.subject_subtype),
-        ("manufacturer_id", observation.manufacturer_id),
-    ]:
-        if value:
-            properties.append(CmoreProperty(clientId=client_id, name=name, value=str(value)))
-    return properties
+        ("subject_subtype", additional.get("subject_subtype")),
+        ("manufacturer_id", observation.external_source_id),
+    ]
+    return [
+        CmoreProperty(clientId=client_id, name=name, value=str(value))
+        for name, value in candidates
+        if value
+    ]
 
 
-@activity_logger()
-async def action_push_observations(
+async def _push_observation(
     integration: Integration,
-    action_config: PushObservationsConfig,
-    data: ObservationTransformedER,
+    observation: schemas.v2.Observation,
     metadata: dict,
 ):
     auth = _get_auth_config(integration)
-    observation = data.payload
     integration_id = str(integration.id)
 
-    # manufacturer_id is the stable identifier (subject_name can change). Fall back to subject_name.
-    subject_key = observation.manufacturer_id or observation.subject_name
+    # external_source_id is the stable subject identifier (source_name can change).
+    # Fall back to source_name if the provider doesn't supply external_source_id.
+    subject_key = observation.external_source_id or observation.source_name
     if not subject_key:
-        raise ValueError("Observation has no manufacturer_id or subject_name; cannot map to a C-more GNode.")
+        raise ValueError(
+            "Observation has no external_source_id or source_name; cannot map to a C-more GNode."
+        )
 
-    # Visible label in C-more — prefer the human-friendly name.
-    callsign = observation.subject_name or observation.manufacturer_id
+    callsign = observation.source_name or observation.external_source_id
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         try:
-            client_id, was_created = await _resolve_client_id(client, integration_id, subject_key, callsign)
+            client_id, was_created = await _resolve_client_id(
+                client, integration_id, subject_key, callsign
+            )
         except Exception as e:
             await log_action_activity(
                 integration_id=integration_id,
-                action_id="push_observations",
+                action_id="deliver",
                 title=f"Failed to resolve GNode for subject '{subject_key}'",
                 level=LogLevel.ERROR,
                 data={"error": f"{type(e).__name__}: {e}", "error_traceback": traceback.format_exc(), **metadata},
             )
             raise
 
-        # Push subject metadata as Cmore properties on first creation.
         if was_created:
             properties = _subject_properties(client_id, observation)
             if properties:
@@ -159,15 +163,12 @@ async def action_push_observations(
     return {"locations_posted": 1, "subject": subject_key, "client_id": client_id}
 
 
-@activity_logger()
-async def action_push_events(
+async def _push_event(
     integration: Integration,
-    action_config: PushEventsConfig,
-    data: EventTransformedER,
-    metadata: dict,
+    action_config: DeliverConfig,
+    event: schemas.v2.Event,
 ):
     auth = _get_auth_config(integration)
-    event = data.payload
 
     tags = None
     if action_config.event_type_to_tag_id and event.event_type:
@@ -177,10 +178,10 @@ async def action_push_events(
 
     location = event.location
     cmore_event = CmoreEvent(
-        description=event.title or event.event_type or "EarthRanger Event",
-        latitude=location.latitude if location else None,
-        longitude=location.longitude if location else None,
-        dateOccurred=event.time,
+        description=event.title or event.event_type or "Gundi Event",
+        latitude=location.lat if location else None,
+        longitude=location.lon if location else None,
+        dateOccurred=event.recorded_at,
         uploadType=UploadType.GENERATED,
         ownerGroupId=auth.owner_group_id,
         tags=tags,
@@ -190,3 +191,41 @@ async def action_push_events(
         response = await client.post_event(cmore_event)
 
     return {"event_posted": True, "cmore_response": response}
+
+
+@activity_logger()
+async def action_deliver(
+    integration: Integration,
+    action_config: DeliverConfig,
+    data: GundiDelivery,
+    metadata: dict,
+):
+    """Single handler for generic-model delivery to C-more.
+
+    Receives any Gundi payload type via the GundiDelivery envelope, applies
+    any RouteConfiguration transformations, then dispatches by payload type.
+    Unsupported payload types are logged and dropped.
+    """
+    payload = apply_transformations(
+        data.payload,
+        data.route_configuration,
+        provider_id=data.provider.provider_id,
+        destination_id=str(integration.id),
+    )
+
+    if isinstance(payload, schemas.v2.Observation):
+        return await _push_observation(integration, payload, metadata)
+
+    if isinstance(payload, schemas.v2.Event):
+        return await _push_event(integration, action_config, payload)
+
+    # Graceful drop for EventUpdate, Attachment, TextMessage
+    payload_type = type(payload).__name__
+    await log_action_activity(
+        integration_id=str(integration.id),
+        action_id="deliver",
+        title=f"C-more does not handle {payload_type}; dropping.",
+        level=LogLevel.INFO,
+        data={**metadata, "payload_type": payload_type},
+    )
+    return {"dropped": True, "payload_type": payload_type}

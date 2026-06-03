@@ -28,16 +28,19 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     )
 
 
-class PushObservationsConfig(PushActionConfiguration):
-    pass
+class DeliverConfig(PushActionConfiguration):
+    """Combined config for the single action_deliver handler.
 
+    Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
+    (event_type_to_tag_id) into one config since one handler now dispatches on
+    payload type internally.
+    """
 
-class PushEventsConfig(PushActionConfiguration):
     event_type_to_tag_id: Optional[Dict[str, int]] = FieldWithUIOptions(
         None,
-        title="EarthRanger event type → C-more tag ID",
+        title="Event type → C-more tag ID",
         description=(
-            "Optional mapping from EarthRanger event_type to C-more tagId. "
+            "Optional mapping from event_type to C-more tagId. "
             "When an event arrives whose event_type is in this map, the matching tag is attached."
         ),
     )
