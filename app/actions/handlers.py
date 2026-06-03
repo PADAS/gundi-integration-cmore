@@ -54,7 +54,12 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     return {"valid_credentials": True}
 
 
-async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_key: str, callsign: str) -> tuple:
+async def _resolve_client_id(
+    client: CmoreClient,
+    integration_id: str,
+    subject_key: str,
+    request: CmoreVirtualClientRequest,
+) -> tuple:
     """Return (client_id, was_created) for a subject, looking up or creating a GNode in Cmore."""
     state = await state_manager.get_state(
         integration_id=integration_id,
@@ -64,12 +69,10 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
     if state.get("client_id"):
         return state["client_id"], False
 
-    track_no = _track_no_for(subject_key)
-
     # Recover from state loss: check if the GNode already exists in C-more.
     mappings = await client.get_gateway_mapping()
     for mapping in mappings:
-        if mapping.trackSource == TRACK_SOURCE and mapping.trackNo == track_no:
+        if mapping.trackSource == request.trackSource and mapping.trackNo == request.trackNo:
             await state_manager.set_state(
                 integration_id=integration_id,
                 action_id="deliver",
@@ -79,11 +82,6 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
             logger.info(f"Recovered GNode clientId={mapping.clientId} for subject '{subject_key}' from gateway_mapping.")
             return mapping.clientId, False
 
-    request = CmoreVirtualClientRequest(
-        trackSource=TRACK_SOURCE,
-        trackNo=track_no,
-        callsign=callsign,
-    )
     gnodes = await client.create_gnodes([request])
     if not gnodes:
         raise ValueError(
@@ -109,6 +107,41 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
     return client_id, True
 
 
+def _subject_config_lookup(observation: schemas.v2.Observation, mapping: dict):
+    """Look up a per-subject config value, matching subject_subtype first, then subject_type."""
+    if not mapping:
+        return None
+    additional = observation.additional or {}
+    for key in (additional.get("subject_subtype"), observation.subject_type):
+        if key and key in mapping:
+            return mapping[key]
+    return None
+
+
+def _gnode_request_for(
+    observation: schemas.v2.Observation,
+    action_config: DeliverConfig,
+    subject_key: str,
+    track_source_type: str,
+) -> CmoreVirtualClientRequest:
+    affiliation = (
+        _subject_config_lookup(observation, action_config.subject_type_to_affiliation)
+        or action_config.default_affiliation
+    )
+    return CmoreVirtualClientRequest(
+        trackSource=TRACK_SOURCE,
+        trackNo=_track_no_for(subject_key),
+        # Callsign is the display name in the portal; targetId identifies the device/unit.
+        callsign=observation.source_name or observation.external_source_id,
+        targetId=observation.external_source_id,
+        trackSourceType=track_source_type,
+        affiliation=affiliation,
+        classification=_subject_config_lookup(
+            observation, action_config.subject_type_to_classification
+        ),
+    )
+
+
 def _subject_properties(client_id: int, observation: schemas.v2.Observation) -> list:
     additional = observation.additional or {}
     candidates = [
@@ -126,8 +159,10 @@ def _subject_properties(client_id: int, observation: schemas.v2.Observation) -> 
 
 async def _push_observation(
     integration: Integration,
+    action_config: DeliverConfig,
     observation: schemas.v2.Observation,
     metadata: dict,
+    track_source_type: str,
 ):
     auth = _get_auth_config(integration)
     integration_id = str(integration.id)
@@ -140,12 +175,12 @@ async def _push_observation(
             "Observation has no external_source_id or source_name; cannot map to a C-more GNode."
         )
 
-    callsign = observation.source_name or observation.external_source_id
+    request = _gnode_request_for(observation, action_config, subject_key, track_source_type)
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         try:
             client_id, was_created = await _resolve_client_id(
-                client, integration_id, subject_key, callsign
+                client, integration_id, subject_key, request
             )
         except Exception as e:
             await log_action_activity(
@@ -229,7 +264,15 @@ async def action_deliver(
     )
 
     if isinstance(payload, schemas.v2.Observation):
-        return await _push_observation(integration, payload, metadata)
+        # trackSourceType identifies the equipment/source system in C-more
+        # (e.g. "telonics"); the provider type slug is the closest Gundi analogue.
+        return await _push_observation(
+            integration,
+            action_config,
+            payload,
+            metadata,
+            track_source_type=data.provider.provider_type,
+        )
 
     if isinstance(payload, schemas.v2.Event):
         return await _push_event(integration, action_config, payload)

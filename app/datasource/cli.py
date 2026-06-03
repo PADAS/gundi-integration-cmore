@@ -95,6 +95,19 @@ def get_tags(ctx):
     run(_run())
 
 
+@cli.command("get-classification-tree")
+@click.pass_context
+def get_classification_tree(ctx):
+    """Fetch the valid classification options (battleDimension/force/type/role) for this instance."""
+    _require_token(ctx)
+    async def _run():
+        async with CmoreClient(base_url=ctx.obj["base_url"], token=ctx.obj["token"]) as client:
+            result = await client.get_classification_tree()
+        click.echo(json.dumps(result, indent=2))
+
+    run(_run())
+
+
 @cli.command("gateway-mapping")
 @click.pass_context
 def gateway_mapping(ctx):

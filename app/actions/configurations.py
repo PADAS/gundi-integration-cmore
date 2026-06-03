@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 
 import pydantic
+from app.datasource.schemas import Affiliation, CmoreClassification
 from app.services.utils import FieldWithUIOptions, GlobalUISchemaOptions, UIOptions
 from .core import AuthActionConfiguration, ExecutableActionMixin, PushActionConfiguration
 
@@ -45,5 +46,32 @@ class DeliverConfig(PushActionConfiguration):
         description=(
             "Optional mapping from event_type to C-more tagId. "
             "When an event arrives whose event_type is in this map, the matching tag is attached."
+        ),
+    )
+    default_affiliation: Affiliation = FieldWithUIOptions(
+        Affiliation.UNKNOWN,
+        title="Default affiliation",
+        description=(
+            "Affiliation for GNodes whose subject type is not in the affiliation map. "
+            "Controls track color in C-more: Unknown=yellow, Friendly=blue, Hostile=red, Neutral=green."
+        ),
+    )
+    subject_type_to_affiliation: Optional[Dict[str, Affiliation]] = FieldWithUIOptions(
+        None,
+        title="Subject type → affiliation",
+        description=(
+            "Optional mapping from Gundi subject_subtype or subject_type to a C-more affiliation, "
+            "e.g. {\"ranger\": \"Friendly\", \"elephant\": \"Neutral\"}. "
+            "subject_subtype is matched first, then subject_type."
+        ),
+    )
+    subject_type_to_classification: Optional[Dict[str, CmoreClassification]] = FieldWithUIOptions(
+        None,
+        title="Subject type → classification",
+        description=(
+            "Optional mapping from Gundi subject_subtype or subject_type to a C-more classification "
+            "(battleDimension/force/type/role), which selects the map icon. "
+            "Valid values are instance-specific — see the get-classification-tree CLI command. "
+            "subject_subtype is matched first, then subject_type."
         ),
     )
