@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 10.0
 
 
+def _giveup_on_client_error(exc: Exception) -> bool:
+    """Don't retry on 4xx status errors — they won't succeed on retry."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and 400 <= exc.response.status_code < 500
+    )
+
+
+# Retry transient transport errors and 5xx; give up immediately on 4xx.
+retry_transient = backoff.on_exception(
+    backoff.expo, httpx.HTTPError, max_tries=5, giveup=_giveup_on_client_error
+)
+
+
 class CmoreClient:
     def __init__(self, base_url: str, token: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT):
         headers = {"Content-Type": "application/json"}
@@ -37,7 +51,7 @@ class CmoreClient:
     async def __aexit__(self, *args):
         await self._client.aclose()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def login(
         self,
         username: str,
@@ -59,41 +73,41 @@ class CmoreClient:
         response.raise_for_status()
         return response.json()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def post_locations(self, locations: List[CmoreLocation]) -> dict:
         payload = [json.loads(loc.json(exclude_none=True)) for loc in locations]
         response = await self._client.post("/v2/clients/virtual/locations", json=payload)
         response.raise_for_status()
         return response.json()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def post_properties(self, properties: List[CmoreProperty]) -> dict:
         payload = [prop.dict() for prop in properties]
         response = await self._client.post("/v2/clients/virtual/properties", json=payload)
         response.raise_for_status()
         return response.json()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def post_event(self, event: CmoreEvent) -> dict:
         payload = json.loads(event.json(exclude_none=True))
         response = await self._client.post("/v2/messages/events", json=payload)
         response.raise_for_status()
         return response.json()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def get_tags(self) -> list:
         response = await self._client.get("/v2/tags/getfull")
         response.raise_for_status()
         return response.json()
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def create_gnodes(self, clients: List[CmoreVirtualClientRequest]) -> List[CmoreGNode]:
         payload = [c.dict(exclude_none=True) for c in clients]
         response = await self._client.post("/v2/clients/virtual", json=payload)
         response.raise_for_status()
         return [CmoreGNode(**item) for item in response.json()]
 
-    @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=5)
+    @retry_transient
     async def get_gateway_mapping(self) -> List[CmoreGatewayMapping]:
         """Fetch existing trackSource/trackNo → clientId mappings for this token's application client."""
         response = await self._client.get("/v2/clients/virtual/gateway_mapping")

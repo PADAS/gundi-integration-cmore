@@ -83,7 +83,20 @@ async def _resolve_client_id(client: CmoreClient, integration_id: str, subject_k
         callsign=callsign,
     )
     gnodes = await client.create_gnodes([request])
-    client_id = gnodes[0].clientId
+    if not gnodes:
+        raise ValueError(
+            f"C-more create_gnodes returned no results for subject '{subject_key}'."
+        )
+    gnode = gnodes[0]
+    if gnode.error:
+        raise ValueError(
+            f"C-more create_gnodes failed for subject '{subject_key}': {gnode.error}"
+        )
+    if not gnode.clientId:
+        raise ValueError(
+            f"C-more create_gnodes returned no clientId for subject '{subject_key}'."
+        )
+    client_id = gnode.clientId
     await state_manager.set_state(
         integration_id=integration_id,
         action_id="deliver",
