@@ -151,7 +151,7 @@ async def _push_observation(
                 action_id="deliver",
                 title=f"Failed to resolve GNode for subject '{subject_key}'",
                 level=LogLevel.ERROR,
-                data={"error": f"{type(e).__name__}: {e}", "error_traceback": traceback.format_exc(), **metadata},
+                data={**metadata, "error": f"{type(e).__name__}: {e}", "error_traceback": traceback.format_exc()},
             )
             raise
 
