@@ -1,0 +1,93 @@
+from datetime import datetime
+from enum import Enum
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class TrackType(str, Enum):
+    OWN_TRACK = "OwnTrack"
+    SYSTEM_TRACK = "SystemTrack"
+    SENSOR_TRACK = "SensorTrack"
+    MANUAL_TRACK = "ManualTrack"
+    EMITTER_POSITION = "EmitterPosition"
+
+
+class Affiliation(str, Enum):
+    UNKNOWN = "Unknown"
+    FRIENDLY = "Friendly"
+    HOSTILE = "Hostile"
+    NEUTRAL = "Neutral"
+
+
+class CmoreLocation(BaseModel):
+    clientId: int
+    latitude: float
+    longitude: float
+    timestamp: datetime
+    altitude: Optional[float] = None
+    accuracy: Optional[float] = None
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+    source: Optional[str] = None
+
+
+class CmoreProperty(BaseModel):
+    clientId: int
+    name: str
+    value: str
+
+
+class CmoreTagValue(BaseModel):
+    fieldId: int
+    value: str
+
+
+class CmoreEventTag(BaseModel):
+    tagId: int
+    values: List[CmoreTagValue] = Field(default_factory=list)
+
+
+class UploadType(str, Enum):
+    GENERATED = "Generated"
+    MOBILE = "Mobile"
+    WEBSITE = "Website"
+    UNKNOWN = "Unknown"
+
+
+class CmoreEvent(BaseModel):
+    description: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    altitude: Optional[float] = None
+    accuracy: Optional[float] = None
+    dateOccurred: Optional[datetime] = None
+    uploadType: UploadType = UploadType.GENERATED
+    ownerGroupId: Optional[int] = None
+    tags: Optional[List[CmoreEventTag]] = None
+
+
+class CmoreVirtualClientRequest(BaseModel):
+    trackSource: str
+    trackNo: int
+    trackType: TrackType = TrackType.OWN_TRACK
+    targetId: Optional[str] = None
+    callsign: Optional[str] = None
+    affiliation: Affiliation = Affiliation.UNKNOWN
+
+
+class CmoreGNode(BaseModel):
+    """Response object returned by POST /v2/clients/virtual."""
+    clientId: int
+    trackNo: int
+    trackSource: str
+    trackType: str
+    error: Optional[str] = None
+    data: Optional[Any] = None
+
+
+class CmoreGatewayMapping(BaseModel):
+    """Returned by GET /v2/clients/virtual/gateway_mapping."""
+    clientId: int
+    trackNo: int
+    trackSource: str
