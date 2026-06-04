@@ -100,3 +100,70 @@ class DeliverConfig(PushActionConfiguration):
             "subject_subtype is matched first, then subject_type."
         ),
     )
+
+    @classmethod
+    def ui_schema(cls, *args, **kwargs):
+        """Hand-built UI schema for the Gundi portal form.
+
+        The auto-walker in UISchemaModelMixin only descends one level and
+        doesn't emit `additionalProperties` hints for `Dict[str, NestedModel]`
+        shapes — so without this override, the portal renders dict values as
+        primitive text inputs ("[object Object]"). The hints below tell
+        react-jsonschema-form how to render each nested level.
+
+        See GUNDI-5366 for the longer-term fix in the template's ui_schema
+        auto-generation.
+        """
+        base = super().ui_schema(*args, **kwargs)
+        base.update({
+            "ui:order": [
+                "event_type_to_tag",
+                "default_affiliation",
+                "subject_type_to_affiliation",
+                "subject_type_to_classification",
+            ],
+            "event_type_to_tag": {
+                "additionalProperties": {
+                    "ui:title": "Tag mapping",
+                    "ui:description": (
+                        "Map this Gundi event_type to a CMORE tag. The "
+                        "object key is the event_type string."
+                    ),
+                    "tag_name": {
+                        "ui:title": "CMORE Tag Name",
+                        "ui:placeholder": "e.g. Poacher Sighting",
+                        "ui:help": (
+                            "Exact tag name from the CMORE instance. Must "
+                            "be visible to this integration's ShareGroup."
+                        ),
+                    },
+                    "field_mappings": {
+                        "ui:description": (
+                            "Map Gundi event_details keys (left) to CMORE "
+                            "field names within the chosen tag (right). "
+                            "For Lookup-typed CMORE fields, the Gundi value "
+                            "must match the CMORE lookup text exactly."
+                        ),
+                        "additionalProperties": {
+                            "ui:title": "CMORE field name",
+                            "ui:placeholder": "e.g. Direction",
+                        },
+                    },
+                },
+            },
+            "subject_type_to_affiliation": {
+                "additionalProperties": {
+                    "ui:title": "Affiliation",
+                },
+            },
+            "subject_type_to_classification": {
+                "additionalProperties": {
+                    "ui:title": "Classification",
+                    "battleDimension": {"ui:title": "Battle Dimension"},
+                    "force": {"ui:title": "Force"},
+                    "type": {"ui:title": "Type"},
+                    "role": {"ui:title": "Role"},
+                },
+            },
+        })
+        return base
