@@ -4,9 +4,8 @@ environs~=9.5.0
 pydantic~=1.10.15
 fastapi~=0.103.2
 uvicorn~=0.23.2
-# gundi-core and gundi-client-v2 are pinned via git ref in requirements.in
-# during the generic-model rollout. Restore version pins here once
-# gundi-core 1.11.3 and gundi-client-v2 3.2.0 are published.
+gundi-core~=1.11.3
+gundi-client-v2~=3.2.0
 stamina~=23.2.0
 redis~=5.0.1
 gcloud-aio-pubsub~=6.0.0

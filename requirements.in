@@ -1,7 +1,2 @@
 # Add your integration-specific dependencies here
 backoff
-
-# Generic-model delivery (pinned to immutable SHAs during rollout; switch to a
-# published version once gundi-core 1.11.3 / gundi-client-v2 3.2.0 are cut).
-gundi-core @ git+https://github.com/PADAS/gundi-core.git@5390551461733669d68502edfdaa4bb32e11a8d0
-gundi-client-v2 @ git+https://github.com/PADAS/gundi-client.git@76377d262332c28fc46d14876eb38a741fc2e57a
