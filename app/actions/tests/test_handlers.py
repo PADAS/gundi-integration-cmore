@@ -81,9 +81,46 @@ def integration():
 
 @pytest.fixture
 def deliver_config():
-    from app.actions.configurations import DeliverConfig
+    from app.actions.configurations import CmoreTagMapping, DeliverConfig
 
-    return DeliverConfig(event_type_to_tag_id={"lion_sighting": 42})
+    return DeliverConfig(
+        event_type_to_tag={
+            "lion_sighting": CmoreTagMapping(
+                tag_name="Wildlife Sighting",
+                field_mappings={
+                    "species": "Species",
+                    "count": "Count",
+                },
+            ),
+        },
+    )
+
+
+@pytest.fixture
+def fake_tag_info():
+    """Stand-in TagInfo a tag_index.get mock can return."""
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    return TagInfo(
+        id=42,
+        name="Wildlife Sighting",
+        domain="Wildlife",
+        type_limiter="Incident",
+        fields={
+            "Species": FieldInfo(id=101, name="Species", data_type="String"),
+            "Count": FieldInfo(id=102, name="Count", data_type="Number"),
+        },
+    )
+
+
+def _patch_tag_index(mocker, returning):
+    """Patch the module-level tag_index singleton's get() to return a fixed value."""
+    from app.actions import handlers as handlers_module
+
+    async def _async_get(*args, **kwargs):
+        return returning
+
+    mocker.patch.object(handlers_module.tag_index, "get", side_effect=_async_get)
 
 
 @pytest.fixture
@@ -203,24 +240,134 @@ async def test_deliver_with_observation_payload_posts_to_locations(
 
 @pytest.mark.asyncio
 async def test_deliver_with_event_payload_posts_event(
-    mocker, integration, deliver_config, provider_info, event, metadata
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
 ):
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
 
+    # event.event_details has species but not count; only Species value lands.
+    event.event_details = {"species": "lion"}
     delivery = GundiDelivery(payload=event, provider=provider_info)
     result = await action_deliver(integration, deliver_config, delivery, metadata)
 
     inner.post_event.assert_awaited_once()
     inner.post_locations.assert_not_awaited()
     assert result["event_posted"] is True
+
     posted = inner.post_event.await_args[0][0]
-    # Lion sighting maps to tag 42 in deliver_config
     assert posted.tags is not None
     assert posted.tags[0].tagId == 42
+    # Only Species field was provided; Count is missing from event_details, skipped.
+    assert len(posted.tags[0].values) == 1
+    assert posted.tags[0].values[0].fieldId == 101
+    assert posted.tags[0].values[0].value == "lion"
+
+
+@pytest.mark.asyncio
+async def test_event_with_missing_tag_still_posts(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """If the configured tag name isn't found on the CMORE instance, the event
+    still posts (without a tag)."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)  # tag not found
+
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags is None  # No tag attached, but event still posted
+    assert result["event_posted"] is True
+
+
+@pytest.mark.asyncio
+async def test_event_with_unmapped_event_type_posts_without_tag(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """event_type is not in event_type_to_tag — no tag attached, no tag_index call."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    tag_mock = mocker.patch("app.actions.handlers.tag_index.get")
+
+    event.event_type = "unconfigured_event_type"
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags is None
+    tag_mock.assert_not_called()
+    assert result["event_posted"] is True
+
+
+@pytest.mark.asyncio
+async def test_event_field_mapping_skips_unknown_field(
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
+):
+    """If a configured field_name doesn't exist on the tag, that field is
+    skipped but the rest of the tag values are sent."""
+    from app.actions.configurations import CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    # Add a mapping to a field that doesn't exist on the fake tag.
+    deliver_config = DeliverConfig(
+        event_type_to_tag={
+            "lion_sighting": CmoreTagMapping(
+                tag_name="Wildlife Sighting",
+                field_mappings={
+                    "species": "Species",
+                    "count": "Count",
+                    "made_up": "Nonexistent",
+                },
+            ),
+        },
+    )
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
+
+    event.event_details = {"species": "lion", "count": 3, "made_up": "value"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    # Only species + count made it; made_up was skipped (Nonexistent field).
+    assert len(posted.tags[0].values) == 2
+    posted_fields = {v.fieldId: v.value for v in posted.tags[0].values}
+    assert posted_fields == {101: "lion", 102: "3"}
+
+
+def test_stringify_for_cmore_handles_common_types():
+    from datetime import datetime, timezone
+
+    from app.actions.handlers import _stringify_for_cmore
+
+    assert _stringify_for_cmore("hello") == "hello"
+    assert _stringify_for_cmore(42) == "42"
+    assert _stringify_for_cmore(3.14) == "3.14"
+    assert _stringify_for_cmore(True) == "true"
+    assert _stringify_for_cmore(False) == "false"
+    assert _stringify_for_cmore(None) is None  # signals "skip"
+    assert (
+        _stringify_for_cmore(datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc))
+        == "2026-06-03T12:00:00+00:00"
+    )
+    assert _stringify_for_cmore([1, 2, 3]) == "[1, 2, 3]"
+    assert _stringify_for_cmore({"k": "v"}) == '{"k": "v"}'
 
 
 @pytest.mark.asyncio
@@ -291,7 +438,7 @@ async def test_deliver_drops_text_message(
 
 @pytest.mark.asyncio
 async def test_transformations_applied_before_event_dispatch(
-    mocker, integration, deliver_config, provider_info, event, metadata
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
 ):
     """A route_configuration rule that rewrites event_type must be visible to
     the event handler — tag mapping reads event.event_type."""
@@ -300,12 +447,13 @@ async def test_transformations_applied_before_event_dispatch(
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
 
     # Start with an event_type the deliver_config map DOES NOT know.
     event.event_type = "raw_species_value"
-    # RouteConfiguration rewrites event_type from event_details.species to a
-    # mapped value that DeliverConfig.event_type_to_tag_id (map: lion_sighting -> 42)
-    # then translates into a tag.
+    # RouteConfiguration rewrites event_type from event_details.species to
+    # "lion_sighting", which IS in deliver_config.event_type_to_tag → triggers
+    # the Wildlife Sighting tag mapping.
     route_config = RouteConfiguration(
         id=uuid.uuid4(),
         name="species → event_type",
@@ -334,7 +482,7 @@ async def test_transformations_applied_before_event_dispatch(
 
     posted = inner.post_event.await_args[0][0]
     assert posted.tags is not None
-    assert posted.tags[0].tagId == 42  # lion → lion_sighting → 42
+    assert posted.tags[0].tagId == 42  # lion → lion_sighting → Wildlife Sighting tag (id 42 in fake_tag_info)
 
 
 @pytest.mark.asyncio

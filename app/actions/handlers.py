@@ -1,6 +1,9 @@
 import hashlib
+import json
 import logging
 import traceback
+from datetime import datetime
+from typing import Optional
 
 from gundi_core import schemas
 from gundi_core.events import GundiDelivery
@@ -13,12 +16,14 @@ from app.datasource.schemas import (
     CmoreEventTag,
     CmoreLocation,
     CmoreProperty,
+    CmoreTagValue,
     CmoreVirtualClientRequest,
     UploadType,
 )
+from app.datasource.tag_index import tag_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, DeliverConfig
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +218,90 @@ async def _push_observation(
     return {"locations_posted": 1, "subject": subject_key, "client_id": client_id}
 
 
+def _stringify_for_cmore(value) -> Optional[str]:
+    """Coerce a Python value into the text form C-more's field model expects.
+
+    C-more field values are all strings. None signals "skip this field
+    entirely" (don't send an empty value).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    # bool subclasses int, so check bool first.
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, default=str)
+    return str(value)
+
+
+async def _build_event_tag(
+    client: CmoreClient,
+    base_url: str,
+    mapping: CmoreTagMapping,
+    event: schemas.v2.Event,
+) -> Optional[CmoreEventTag]:
+    """Resolve mapping + event_details into a CmoreEventTag.
+
+    Returns None if the configured tag is not found on the C-more instance —
+    the event still gets posted (with description + location), just without
+    the structured tag.
+    """
+    tag_info = await tag_index.get(client, base_url, mapping.tag_name)
+    if tag_info is None:
+        logger.warning(
+            "CMORE tag %r not found on instance; dropping tag from event "
+            "(event_type=%r). Event will still post with description/location only.",
+            mapping.tag_name,
+            event.event_type,
+        )
+        return None
+
+    # The C-more events endpoint accepts tags whose typeLimiter is Message or
+    # Incident. Resource-typed tags belong to a different entity model.
+    if tag_info.type_limiter not in ("Message", "Incident"):
+        logger.warning(
+            "CMORE tag %r has typeLimiter=%r which is not Message/Incident; "
+            "C-more may reject the event.",
+            tag_info.name,
+            tag_info.type_limiter,
+        )
+
+    details = event.event_details or {}
+    values = []
+    for ed_key, field_name in (mapping.field_mappings or {}).items():
+        field_info = tag_info.field_by_name(field_name)
+        if field_info is None:
+            logger.warning(
+                "CMORE tag %r has no field %r; skipping event_details key %r.",
+                tag_info.name,
+                field_name,
+                ed_key,
+            )
+            continue
+        raw_value = details.get(ed_key)
+        stringified = _stringify_for_cmore(raw_value)
+        if stringified is None:
+            continue
+        values.append(CmoreTagValue(fieldId=field_info.id, value=stringified))
+
+    logger.info(
+        "Attached CMORE tag %r (tagId=%d, typeLimiter=%s) with %d field value(s) "
+        "to event (event_type=%r).",
+        tag_info.name,
+        tag_info.id,
+        tag_info.type_limiter,
+        len(values),
+        event.event_type,
+    )
+    return CmoreEventTag(tagId=tag_info.id, values=values)
+
+
 async def _push_event(
     integration: Integration,
     action_config: DeliverConfig,
@@ -220,25 +309,50 @@ async def _push_event(
 ):
     auth = _get_auth_config(integration)
 
-    tags = None
-    if action_config.event_type_to_tag_id and event.event_type:
-        tag_id = action_config.event_type_to_tag_id.get(event.event_type)
-        if tag_id is not None:
-            tags = [CmoreEventTag(tagId=tag_id)]
+    if action_config.event_type_to_tag is None:
+        logger.info(
+            "DeliverConfig.event_type_to_tag is None; posting event (event_type=%r) "
+            "with no tag.",
+            event.event_type,
+        )
+    elif event.event_type not in (action_config.event_type_to_tag or {}):
+        logger.info(
+            "No event_type_to_tag mapping for event_type=%r; posting event with "
+            "no tag. Known mappings: %s",
+            event.event_type,
+            list((action_config.event_type_to_tag or {}).keys()),
+        )
 
-    location = event.location
-    cmore_event = CmoreEvent(
-        description=event.title or event.event_type or "Gundi Event",
-        latitude=location.lat if location else None,
-        longitude=location.lon if location else None,
-        dateOccurred=event.recorded_at,
-        uploadType=UploadType.GENERATED,
-        ownerGroupId=auth.owner_group_id,
-        tags=tags,
+    mapping = (
+        action_config.event_type_to_tag.get(event.event_type)
+        if action_config.event_type_to_tag and event.event_type
+        else None
     )
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+        tags = None
+        if mapping is not None:
+            tag = await _build_event_tag(client, auth.base_url, mapping, event)
+            if tag is not None:
+                tags = [tag]
+
+        location = event.location
+        cmore_event = CmoreEvent(
+            description=event.title or event.event_type or "Gundi Event",
+            latitude=location.lat if location else None,
+            longitude=location.lon if location else None,
+            dateOccurred=event.recorded_at,
+            uploadType=UploadType.GENERATED,
+            ownerGroupId=auth.owner_group_id,
+            tags=tags,
+        )
         response = await client.post_event(cmore_event)
+        logger.info(
+            "Posted CMORE event (event_type=%r, has_tag=%s): cmore_response=%r",
+            event.event_type,
+            tags is not None,
+            response,
+        )
 
     return {"event_posted": True, "cmore_response": response}
 
