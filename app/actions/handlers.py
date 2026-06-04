@@ -290,6 +290,15 @@ async def _build_event_tag(
             continue
         values.append(CmoreTagValue(fieldId=field_info.id, value=stringified))
 
+    logger.info(
+        "Attached CMORE tag %r (tagId=%d, typeLimiter=%s) with %d field value(s) "
+        "to event (event_type=%r).",
+        tag_info.name,
+        tag_info.id,
+        tag_info.type_limiter,
+        len(values),
+        event.event_type,
+    )
     return CmoreEventTag(tagId=tag_info.id, values=values)
 
 
@@ -299,6 +308,20 @@ async def _push_event(
     event: schemas.v2.Event,
 ):
     auth = _get_auth_config(integration)
+
+    if action_config.event_type_to_tag is None:
+        logger.info(
+            "DeliverConfig.event_type_to_tag is None; posting event (event_type=%r) "
+            "with no tag.",
+            event.event_type,
+        )
+    elif event.event_type not in (action_config.event_type_to_tag or {}):
+        logger.info(
+            "No event_type_to_tag mapping for event_type=%r; posting event with "
+            "no tag. Known mappings: %s",
+            event.event_type,
+            list((action_config.event_type_to_tag or {}).keys()),
+        )
 
     mapping = (
         action_config.event_type_to_tag.get(event.event_type)
@@ -324,6 +347,12 @@ async def _push_event(
             tags=tags,
         )
         response = await client.post_event(cmore_event)
+        logger.info(
+            "Posted CMORE event (event_type=%r, has_tag=%s): cmore_response=%r",
+            event.event_type,
+            tags is not None,
+            response,
+        )
 
     return {"event_posted": True, "cmore_response": response}
 
