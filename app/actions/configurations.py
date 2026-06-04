@@ -102,7 +102,14 @@ class SubjectAffiliationMapping(pydantic.BaseModel):
 
 
 class SubjectClassificationMapping(pydantic.BaseModel):
-    """Map a Gundi subject_type/subject_subtype to a C-more classification."""
+    """Map a Gundi subject_type/subject_subtype to a C-more classification.
+
+    The classification fields (battleDimension/force/type/role) are flattened
+    directly onto this model rather than nested under a `classification`
+    sub-object — same portal-rendering workaround as the parent dict→list
+    refactor (GUNDI-5371). Handler reassembles them into a CmoreClassification
+    before sending to C-more.
+    """
 
     subject_type: str = FieldWithUIOptions(
         ...,
@@ -112,10 +119,25 @@ class SubjectClassificationMapping(pydantic.BaseModel):
             "then subject_type."
         ),
     )
-    classification: CmoreClassification = FieldWithUIOptions(
-        ...,
-        title="C-more classification",
-        description="battleDimension / force / type / role.",
+    battleDimension: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Battle Dimension",
+        description="C-more classification.battleDimension (e.g. LAND, AIR, SEA).",
+    )
+    force: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Force",
+        description="C-more classification.force (e.g. ANIMAL, UNIT, CIVIL).",
+    )
+    type: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Type",
+        description="C-more classification.type (e.g. DOG, RHINO, FIXED_WING).",
+    )
+    role: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Role",
+        description="C-more classification.role (e.g. K9, POLICE_OFFICER).",
     )
 
 
@@ -210,12 +232,10 @@ class DeliverConfig(PushActionConfiguration):
             "subject_type_to_classification": {
                 "items": {
                     "subject_type": {"ui:placeholder": "e.g. ranger"},
-                    "classification": {
-                        "battleDimension": {"ui:title": "Battle Dimension"},
-                        "force": {"ui:title": "Force"},
-                        "type": {"ui:title": "Type"},
-                        "role": {"ui:title": "Role"},
-                    },
+                    "battleDimension": {"ui:placeholder": "e.g. LAND"},
+                    "force": {"ui:placeholder": "e.g. ANIMAL"},
+                    "type": {"ui:placeholder": "e.g. DOG"},
+                    "role": {"ui:placeholder": "e.g. K9"},
                 },
             },
         })

@@ -12,6 +12,7 @@ from gundi_client_v2.transformations import apply_transformations
 
 from app.datasource.client import CmoreClient
 from app.datasource.schemas import (
+    CmoreClassification,
     CmoreEvent,
     CmoreEventTag,
     CmoreLocation,
@@ -146,7 +147,16 @@ def _gnode_request_for(
     cls_mapping = _find_subject_mapping(
         observation, action_config.subject_type_to_classification
     )
-    classification = cls_mapping.classification if cls_mapping else None
+    classification = (
+        CmoreClassification(
+            battleDimension=cls_mapping.battleDimension,
+            force=cls_mapping.force,
+            type=cls_mapping.type,
+            role=cls_mapping.role,
+        )
+        if cls_mapping
+        else None
+    )
     return CmoreVirtualClientRequest(
         trackSource=TRACK_SOURCE,
         trackNo=_track_no_for(subject_key),

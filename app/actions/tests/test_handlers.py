@@ -518,7 +518,8 @@ async def test_deliver_creates_gnode_with_mapped_affiliation_and_classification(
         subject_type_to_classification=[
             SubjectClassificationMapping(
                 subject_type="elephant",
-                classification=CmoreClassification(battleDimension="LAND", force="NONMILITARY"),
+                battleDimension="LAND",
+                force="NONMILITARY",
             ),
         ],
     )
