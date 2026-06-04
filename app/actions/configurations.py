@@ -36,8 +36,13 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
 # mappings below, but the Gundi portal's form renderer mis-handles
 # `additionalProperties` with object values and displays "[object Object]"
 # for them. We use List[NestedModel-with-explicit-key-field] as a workaround
-# because portal renders arrays correctly. Revert to dict shapes once the
-# portal bug GUNDI-5371 is fixed.
+# because portal renders arrays correctly. Same goes for any further-nested
+# object fields inside those array items — flatten them onto the parent
+# (see SubjectClassificationMapping below, where CmoreClassification's four
+# fields are flattened in).
+#
+# See docs/portal-rendering-workaround.md for the full rationale and the
+# revert plan when the portal bug GUNDI-5371 is fixed.
 
 
 class CmoreFieldMapping(pydantic.BaseModel):
