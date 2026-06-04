@@ -163,7 +163,7 @@ async def test_tag_index_get_returns_tag_info():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    tag = await idx.get(client, "https://example/api", "Poacher Sighting")
+    tag = await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
     assert tag is not None
     assert tag.id == 29
     assert tag.fields["Direction"].id == 1327
@@ -174,19 +174,19 @@ async def test_tag_index_get_returns_none_for_unknown_tag():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    tag = await idx.get(client, "https://example/api", "Not A Real Tag")
+    tag = await idx.get(client, "https://example/api", "int-1", "Not A Real Tag")
     assert tag is None
 
 
 @pytest.mark.asyncio
-async def test_tag_index_calls_get_tags_only_once_per_base_url():
-    """The cache should prevent repeated CMORE API calls for the same instance."""
+async def test_tag_index_calls_get_tags_only_once_per_integration():
+    """Repeated lookups for the same (base_url, integration_id) should hit cache."""
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "Poacher Sighting")
-    await idx.get(client, "https://example/api", "Poacher Sighting")
-    await idx.get(client, "https://example/api", "test tag")
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "https://example/api", "int-1", "test tag")
 
     assert client.get_tags.await_count == 1
 
@@ -211,13 +211,34 @@ async def test_tag_index_separates_caches_per_base_url():
         ]
     )
 
-    a_tag = await idx.get(client_a, "https://a/api", "Poacher Sighting")
-    b_tag = await idx.get(client_b, "https://b/api", "B Only Tag")
+    a_tag = await idx.get(client_a, "https://a/api", "int-1", "Poacher Sighting")
+    b_tag = await idx.get(client_b, "https://b/api", "int-2", "B Only Tag")
 
     assert a_tag.id == 29
     assert b_tag.id == 999
     # 'Poacher Sighting' shouldn't be reachable on b
-    assert await idx.get(client_b, "https://b/api", "Poacher Sighting") is None
+    assert await idx.get(client_b, "https://b/api", "int-2", "Poacher Sighting") is None
+
+
+@pytest.mark.asyncio
+async def test_tag_index_separates_caches_per_integration_same_base_url():
+    """Two integrations against the same CMORE may see different tag sets
+    (per-ShareGroup visibility). The cache MUST not pool them under the same key."""
+    idx = TagIndex()
+    # Integration A sees nothing (e.g., a ShareGroup with no subscribed tags)
+    client_low_visibility = _make_client_with_get_tags([])
+    # Integration B sees the full Wildlife domain
+    client_high_visibility = _make_client_with_get_tags(_sample_response())
+
+    a_tag = await idx.get(client_low_visibility, "https://shared/api", "int-A", "Poacher Sighting")
+    b_tag = await idx.get(client_high_visibility, "https://shared/api", "int-B", "Poacher Sighting")
+
+    assert a_tag is None              # low-visibility integration: tag absent
+    assert b_tag is not None           # high-visibility integration: tag present
+    assert b_tag.id == 29
+    # Each integration triggered its own get_tags() call.
+    assert client_low_visibility.get_tags.await_count == 1
+    assert client_high_visibility.get_tags.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -225,9 +246,9 @@ async def test_tag_index_reset_clears_cache():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "Poacher Sighting")
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
     idx._reset()
-    await idx.get(client, "https://example/api", "Poacher Sighting")
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
 
     # Cache was cleared, so get_tags called twice.
     assert client.get_tags.await_count == 2
