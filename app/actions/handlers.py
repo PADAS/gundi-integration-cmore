@@ -243,6 +243,7 @@ def _stringify_for_cmore(value) -> Optional[str]:
 async def _build_event_tag(
     client: CmoreClient,
     base_url: str,
+    integration_id: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
 ) -> Optional[CmoreEventTag]:
@@ -252,7 +253,7 @@ async def _build_event_tag(
     the event still gets posted (with description + location), just without
     the structured tag.
     """
-    tag_info = await tag_index.get(client, base_url, mapping.tag_name)
+    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag_name)
     if tag_info is None:
         logger.warning(
             "CMORE tag %r not found on instance; dropping tag from event "
@@ -332,7 +333,9 @@ async def _push_event(
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None
         if mapping is not None:
-            tag = await _build_event_tag(client, auth.base_url, mapping, event)
+            tag = await _build_event_tag(
+                client, auth.base_url, str(integration.id), mapping, event
+            )
             if tag is not None:
                 tags = [tag]
 

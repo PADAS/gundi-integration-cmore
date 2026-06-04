@@ -84,43 +84,52 @@ def _build_index(raw_response: list) -> Dict[str, TagInfo]:
 
 
 class TagIndex:
-    """Lazy, per-base_url cache of the CMORE tag schema.
+    """Lazy, per-(base_url, integration_id) cache of the CMORE tag schema.
 
-    Different Gundi integrations may point at different CMORE instances with
-    different tag schemas, so the cache is keyed by base_url. We assume one
-    set of credentials per base_url for visibility purposes; if that changes
-    we'll need to key by (base_url, integration_id) instead.
+    CMORE scopes tag visibility by ShareGroup, which is bound to the token
+    on a per-integration basis. Two Gundi integrations pointing at the same
+    CMORE instance with different tokens see different tag sets — so the
+    cache MUST be keyed by integration_id too, not just base_url, otherwise
+    one integration's empty view poisons the other's resolution.
     """
 
     def __init__(self) -> None:
-        self._cache: Dict[str, Dict[str, TagInfo]] = {}
+        # Key: (base_url, integration_id) → {tag_name: TagInfo}
+        self._cache: Dict[tuple, Dict[str, TagInfo]] = {}
         self._lock = asyncio.Lock()
 
     async def get(
-        self, client: CmoreClient, base_url: str, tag_name: str
+        self,
+        client: CmoreClient,
+        base_url: str,
+        integration_id: str,
+        tag_name: str,
     ) -> Optional[TagInfo]:
-        """Resolve a tag by name on the given CMORE instance."""
-        index = await self._ensure_loaded(client, base_url)
+        """Resolve a tag by name for the given integration's CMORE view."""
+        index = await self._ensure_loaded(client, base_url, integration_id)
         return index.get(tag_name)
 
     async def _ensure_loaded(
-        self, client: CmoreClient, base_url: str
+        self, client: CmoreClient, base_url: str, integration_id: str
     ) -> Dict[str, TagInfo]:
-        if base_url in self._cache:
-            return self._cache[base_url]
+        key = (base_url, integration_id)
+        if key in self._cache:
+            return self._cache[key]
         async with self._lock:
             # Double-check after acquiring the lock — another coroutine may
             # have populated while we were waiting.
-            if base_url in self._cache:
-                return self._cache[base_url]
+            if key in self._cache:
+                return self._cache[key]
             raw = await client.get_tags()
             index = _build_index(raw)
             logger.info(
-                "Built CMORE tag index for %s: %d tags across all domains",
+                "Built CMORE tag index for %s (integration=%s): "
+                "%d tags across all domains",
                 base_url,
+                integration_id,
                 len(index),
             )
-            self._cache[base_url] = index
+            self._cache[key] = index
             return index
 
     def _reset(self) -> None:
