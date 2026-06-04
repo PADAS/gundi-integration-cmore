@@ -12,6 +12,7 @@ from gundi_client_v2.transformations import apply_transformations
 
 from app.datasource.client import CmoreClient
 from app.datasource.schemas import (
+    CmoreClassification,
     CmoreEvent,
     CmoreEventTag,
     CmoreLocation,
@@ -112,14 +113,22 @@ async def _resolve_client_id(
     return client_id, True
 
 
-def _subject_config_lookup(observation: schemas.v2.Observation, mapping: dict):
-    """Look up a per-subject config value, matching subject_subtype first, then subject_type."""
-    if not mapping:
+def _find_subject_mapping(observation: schemas.v2.Observation, mappings):
+    """Return the first mapping whose subject_type matches the observation.
+
+    Matches against subject_subtype first, then subject_type. Returns the
+    mapping object itself (not a value); call sites pick the relevant
+    attribute (`.affiliation`, `.classification`, etc.).
+    """
+    if not mappings:
         return None
     additional = observation.additional or {}
-    for key in (additional.get("subject_subtype"), observation.subject_type):
-        if key and key in mapping:
-            return mapping[key]
+    for cand in (additional.get("subject_subtype"), observation.subject_type):
+        if not cand:
+            continue
+        for m in mappings:
+            if m.subject_type == cand:
+                return m
     return None
 
 
@@ -129,9 +138,24 @@ def _gnode_request_for(
     subject_key: str,
     track_source_type: str,
 ) -> CmoreVirtualClientRequest:
+    aff_mapping = _find_subject_mapping(
+        observation, action_config.subject_type_to_affiliation
+    )
     affiliation = (
-        _subject_config_lookup(observation, action_config.subject_type_to_affiliation)
-        or action_config.default_affiliation
+        aff_mapping.affiliation if aff_mapping else action_config.default_affiliation
+    )
+    cls_mapping = _find_subject_mapping(
+        observation, action_config.subject_type_to_classification
+    )
+    classification = (
+        CmoreClassification(
+            battleDimension=cls_mapping.battleDimension,
+            force=cls_mapping.force,
+            type=cls_mapping.type,
+            role=cls_mapping.role,
+        )
+        if cls_mapping
+        else None
     )
     return CmoreVirtualClientRequest(
         trackSource=TRACK_SOURCE,
@@ -141,9 +165,7 @@ def _gnode_request_for(
         targetId=observation.external_source_id,
         trackSourceType=track_source_type,
         affiliation=affiliation,
-        classification=_subject_config_lookup(
-            observation, action_config.subject_type_to_classification
-        ),
+        classification=classification,
     )
 
 
@@ -275,7 +297,9 @@ async def _build_event_tag(
 
     details = event.event_details or {}
     values = []
-    for ed_key, field_name in (mapping.field_mappings or {}).items():
+    for fm in (mapping.field_mappings or []):
+        ed_key = fm.event_details_key
+        field_name = fm.cmore_field_name
         field_info = tag_info.field_by_name(field_name)
         if field_info is None:
             logger.warning(
@@ -310,25 +334,27 @@ async def _push_event(
 ):
     auth = _get_auth_config(integration)
 
+    mapping = None
+    if action_config.event_type_to_tag and event.event_type:
+        mapping = next(
+            (m for m in action_config.event_type_to_tag if m.event_type == event.event_type),
+            None,
+        )
+
     if action_config.event_type_to_tag is None:
         logger.info(
             "DeliverConfig.event_type_to_tag is None; posting event (event_type=%r) "
             "with no tag.",
             event.event_type,
         )
-    elif event.event_type not in (action_config.event_type_to_tag or {}):
+    elif mapping is None:
+        known = [m.event_type for m in action_config.event_type_to_tag]
         logger.info(
             "No event_type_to_tag mapping for event_type=%r; posting event with "
-            "no tag. Known mappings: %s",
+            "no tag. Known event_types: %s",
             event.event_type,
-            list((action_config.event_type_to_tag or {}).keys()),
+            known,
         )
-
-    mapping = (
-        action_config.event_type_to_tag.get(event.event_type)
-        if action_config.event_type_to_tag and event.event_type
-        else None
-    )
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None

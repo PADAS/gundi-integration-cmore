@@ -81,18 +81,23 @@ def integration():
 
 @pytest.fixture
 def deliver_config():
-    from app.actions.configurations import CmoreTagMapping, DeliverConfig
+    from app.actions.configurations import (
+        CmoreFieldMapping,
+        CmoreTagMapping,
+        DeliverConfig,
+    )
 
     return DeliverConfig(
-        event_type_to_tag={
-            "lion_sighting": CmoreTagMapping(
+        event_type_to_tag=[
+            CmoreTagMapping(
+                event_type="lion_sighting",
                 tag_name="Wildlife Sighting",
-                field_mappings={
-                    "species": "Species",
-                    "count": "Count",
-                },
+                field_mappings=[
+                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
+                ],
             ),
-        },
+        ],
     )
 
 
@@ -318,21 +323,26 @@ async def test_event_field_mapping_skips_unknown_field(
 ):
     """If a configured field_name doesn't exist on the tag, that field is
     skipped but the rest of the tag values are sent."""
-    from app.actions.configurations import CmoreTagMapping, DeliverConfig
+    from app.actions.configurations import (
+        CmoreFieldMapping,
+        CmoreTagMapping,
+        DeliverConfig,
+    )
     from app.actions.handlers import action_deliver
 
     # Add a mapping to a field that doesn't exist on the fake tag.
     deliver_config = DeliverConfig(
-        event_type_to_tag={
-            "lion_sighting": CmoreTagMapping(
+        event_type_to_tag=[
+            CmoreTagMapping(
+                event_type="lion_sighting",
                 tag_name="Wildlife Sighting",
-                field_mappings={
-                    "species": "Species",
-                    "count": "Count",
-                    "made_up": "Nonexistent",
-                },
+                field_mappings=[
+                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
+                    CmoreFieldMapping(event_details_key="made_up", cmore_field_name="Nonexistent"),
+                ],
             ),
-        },
+        ],
     )
 
     inner = _patch_cmore_client(mocker)
@@ -489,7 +499,11 @@ async def test_transformations_applied_before_event_dispatch(
 async def test_deliver_creates_gnode_with_mapped_affiliation_and_classification(
     mocker, integration, provider_info, observation, metadata
 ):
-    from app.actions.configurations import DeliverConfig
+    from app.actions.configurations import (
+        DeliverConfig,
+        SubjectAffiliationMapping,
+        SubjectClassificationMapping,
+    )
     from app.actions.handlers import action_deliver
     from app.datasource.schemas import Affiliation, CmoreClassification
 
@@ -498,10 +512,16 @@ async def test_deliver_creates_gnode_with_mapped_affiliation_and_classification(
     _patch_activity_logger(mocker)
 
     config = DeliverConfig(
-        subject_type_to_affiliation={"elephant": Affiliation.NEUTRAL},
-        subject_type_to_classification={
-            "elephant": CmoreClassification(battleDimension="LAND", force="NONMILITARY")
-        },
+        subject_type_to_affiliation=[
+            SubjectAffiliationMapping(subject_type="elephant", affiliation=Affiliation.NEUTRAL),
+        ],
+        subject_type_to_classification=[
+            SubjectClassificationMapping(
+                subject_type="elephant",
+                battleDimension="LAND",
+                force="NONMILITARY",
+            ),
+        ],
     )
     delivery = GundiDelivery(payload=observation, provider=provider_info)
     await action_deliver(integration, config, delivery, metadata)
@@ -528,12 +548,14 @@ async def test_deliver_subject_subtype_takes_precedence_over_subject_type(
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
 
+    from app.actions.configurations import SubjectAffiliationMapping
+
     observation.additional = {"subject_subtype": "ranger"}
     config = DeliverConfig(
-        subject_type_to_affiliation={
-            "ranger": Affiliation.FRIENDLY,
-            "elephant": Affiliation.NEUTRAL,
-        },
+        subject_type_to_affiliation=[
+            SubjectAffiliationMapping(subject_type="ranger", affiliation=Affiliation.FRIENDLY),
+            SubjectAffiliationMapping(subject_type="elephant", affiliation=Affiliation.NEUTRAL),
+        ],
     )
     delivery = GundiDelivery(payload=observation, provider=provider_info)
     await action_deliver(integration, config, delivery, metadata)
@@ -554,9 +576,13 @@ async def test_deliver_uses_default_affiliation_when_subject_unmapped(
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
 
+    from app.actions.configurations import SubjectAffiliationMapping
+
     config = DeliverConfig(
         default_affiliation=Affiliation.FRIENDLY,
-        subject_type_to_affiliation={"lion": Affiliation.NEUTRAL},
+        subject_type_to_affiliation=[
+            SubjectAffiliationMapping(subject_type="lion", affiliation=Affiliation.NEUTRAL),
+        ],
     )
     delivery = GundiDelivery(payload=observation, provider=provider_info)
     await action_deliver(integration, config, delivery, metadata)
