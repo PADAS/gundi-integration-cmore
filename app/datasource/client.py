@@ -6,6 +6,7 @@ import backoff
 import httpx
 
 from .schemas import (
+    CmoreComment,
     CmoreEvent,
     CmoreGatewayMapping,
     CmoreGNode,
@@ -104,6 +105,20 @@ class CmoreClient:
     async def post_event(self, event: CmoreEvent) -> dict:
         payload = json.loads(event.json(exclude_none=True))
         response = await self._client.post("/v2/messages/events", json=payload)
+        response.raise_for_status()
+        return _safe_json(response, {})
+
+    @retry_transient
+    async def post_comment(self, comment: CmoreComment) -> dict:
+        """Attach a text comment to an existing CMORE event.
+
+        ``rootMessageId`` on the request body is the CMORE messageId returned
+        by a prior ``post_event``; the comment is hung off that event. Note
+        that the CMORE comment endpoint sits at ``/comment`` (no v2 prefix),
+        unlike most of the rest of this client.
+        """
+        payload = json.loads(comment.json(exclude_none=True))
+        response = await self._client.post("/comment", json=payload)
         response.raise_for_status()
         return _safe_json(response, {})
 

@@ -182,11 +182,12 @@ def metadata():
     return {"gundi_id": str(uuid.uuid4())}
 
 
-def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=None):
+def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=None, post_comment_return=None):
     """Patch the CmoreClient async-context-manager and capture method calls."""
     inner = MagicMock()
     inner.post_locations = AsyncMock(return_value=post_locations_return or {"status": "ok"})
-    inner.post_event = AsyncMock(return_value=post_event_return or {"id": 123})
+    inner.post_event = AsyncMock(return_value=post_event_return or {"messageId": 14697})
+    inner.post_comment = AsyncMock(return_value=post_comment_return or {"id": 88888})
     inner.post_properties = AsyncMock(return_value={"status": "ok"})
     inner.get_gateway_mapping = AsyncMock(return_value=[])
     inner.create_gnodes = AsyncMock(
@@ -381,27 +382,176 @@ def test_stringify_for_cmore_handles_common_types():
 
 
 @pytest.mark.asyncio
-async def test_deliver_drops_event_update(
+async def test_deliver_event_update_logs_warning_when_no_mapping_exists(
     mocker, integration, deliver_config, provider_info, metadata
 ):
+    """EventUpdate for an external_source_id we never saw via post_event → log WARNING and drop."""
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker)
+    # State manager returns empty for the EventUpdate's external_source_id lookup.
     _patch_state_manager(mocker)
     activity_log = _patch_activity_logger(mocker)
 
     eu = EventUpdate(
         source_id=uuid.uuid4(),
-        external_source_id="x",
+        external_source_id="er-uuid-never-seen",
         changes={"status": "resolved"},
     )
     delivery = GundiDelivery(payload=eu, provider=provider_info)
     result = await action_deliver(integration, deliver_config, delivery, metadata)
 
-    inner.post_locations.assert_not_awaited()
     inner.post_event.assert_not_awaited()
-    assert result == {"dropped": True, "payload_type": "EventUpdate"}
+    inner.post_comment.assert_not_awaited()
+    assert result["dropped"] is True
+    assert result["reason"] == "cmore_message_id_not_found"
+    # The WARNING activity log surfaces this for ops monitoring.
     activity_log.assert_awaited_once()
+    log_kwargs = activity_log.call_args.kwargs
+    from gundi_core.schemas.v2 import LogLevel
+    assert log_kwargs["level"] == LogLevel.WARNING
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_update_posts_status_change_as_comment(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """Status change → post_comment with synthetic 'Status changed to X' body."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    # State manager has the mapping from a prior post_event delivery.
+    state = AsyncMock()
+    state.get_state = AsyncMock(return_value={"cmore_message_id": 14697})
+    state.set_state = AsyncMock()
+    mocker.patch("app.actions.handlers.state_manager", state)
+    _patch_activity_logger(mocker)
+
+    eu = EventUpdate(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid-seen",
+        changes={"status": "active"},
+    )
+    delivery = GundiDelivery(payload=eu, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_comment.assert_awaited_once()
+    sent_comment = inner.post_comment.call_args.args[0]
+    assert sent_comment.rootMessageId == 14697
+    assert "Status changed to active" in sent_comment.description
+    assert result["comment_posted"] is True
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_update_posts_note_as_comment_with_author(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """A new note in changes → comment body carries author + timestamp + text."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    state = AsyncMock()
+    state.get_state = AsyncMock(return_value={"cmore_message_id": 14697})
+    state.set_state = AsyncMock()
+    mocker.patch("app.actions.handlers.state_manager", state)
+    _patch_activity_logger(mocker)
+
+    eu = EventUpdate(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid-seen",
+        changes={
+            "notes": [
+                {
+                    "id": "note-uuid",
+                    "text": "Fresh tracks at the perimeter.",
+                    "created_at": "2026-06-09T10:00:00+00:00",
+                    "updates": [
+                        {"user": {"username": "ranger1"}, "type": "add_eventnote"}
+                    ],
+                }
+            ]
+        },
+    )
+    delivery = GundiDelivery(payload=eu, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_comment.assert_awaited_once()
+    sent = inner.post_comment.call_args.args[0]
+    assert sent.rootMessageId == 14697
+    assert "ranger1" in sent.description
+    assert "Fresh tracks at the perimeter." in sent.description
+    assert "2026-06-09T10:00:00+00:00" in sent.description
+
+
+def test_format_event_update_comment_handles_all_change_kinds():
+    """The formatter covers each change type emitted by the ER runner."""
+    from app.actions.handlers import _format_event_update_comment
+
+    assert _format_event_update_comment({"status": "active"}) == "Status changed to active"
+    assert _format_event_update_comment({"priority": 200}) == "Priority changed to 200"
+    assert _format_event_update_comment({"title": "X"}) == "Title changed to 'X'"
+    assert _format_event_update_comment({}) is None
+    assert _format_event_update_comment({"unknown": "field"}) is None
+    note = {
+        "id": "n",
+        "text": "hello",
+        "created_at": "2026-06-09T10:00:00+00:00",
+        "updates": [{"user": {"username": "ranger1"}}],
+    }
+    body = _format_event_update_comment({"notes": [note]})
+    assert "ranger1" in body and "hello" in body and "2026-06-09T10:00:00+00:00" in body
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_records_mapping_for_followup_updates(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """post_event response carries messageId; we persist it for future EventUpdate lookups."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
+    state = _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid-new",
+        recorded_at=datetime.now(tz=timezone.utc),
+        event_type="poacher_sighting_rep",
+        title="A sighting",
+        location=Location(lat=0.0, lon=0.0),
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    state.set_state.assert_awaited_once()
+    call_kwargs = state.set_state.call_args.kwargs
+    assert call_kwargs["source_id"] == "er-uuid-new"
+    assert call_kwargs["state"] == {"cmore_message_id": 99999}
+    # Mapping is bounded by a TTL so the Redis keyspace doesn't grow forever.
+    from app.actions.handlers import CMORE_EVENT_MAPPING_TTL_SECONDS
+    assert call_kwargs["ttl_seconds"] == CMORE_EVENT_MAPPING_TTL_SECONDS
+
+
+def test_extract_message_id_coerces_to_int():
+    """CMORE post_event responses get normalized to int messageId or None."""
+    from app.actions.handlers import _extract_message_id
+
+    assert _extract_message_id({"messageId": 14697}) == 14697
+    # String-typed numeric messageIds coerce cleanly.
+    assert _extract_message_id({"messageId": "14697"}) == 14697
+    # Non-integer values return None (and log; not asserted here) rather than
+    # storing garbage that would crash later at CmoreComment(rootMessageId=...).
+    assert _extract_message_id({"messageId": "not-a-number"}) is None
+    assert _extract_message_id({"messageId": None}) is None
+    # Missing key, non-dict input.
+    assert _extract_message_id({}) is None
+    assert _extract_message_id(None) is None
+    assert _extract_message_id("not-a-dict") is None
+    # The pre-PR 'or response.get("id")' fallback is intentionally gone —
+    # CMORE's documented response is `messageId`, full stop.
+    assert _extract_message_id({"id": 12345}) is None
 
 
 @pytest.mark.asyncio
