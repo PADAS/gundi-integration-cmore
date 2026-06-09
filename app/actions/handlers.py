@@ -13,6 +13,7 @@ from gundi_client_v2.transformations import apply_transformations
 from app.datasource.client import CmoreClient
 from app.datasource.schemas import (
     CmoreClassification,
+    CmoreComment,
     CmoreEvent,
     CmoreEventTag,
     CmoreLocation,
@@ -383,7 +384,147 @@ async def _push_event(
             response,
         )
 
+    # Persist the source→messageId mapping so a subsequent EventUpdate for the
+    # same source event can be hung off this CMORE event as a comment
+    # (GUNDI-5386). Keyed by the provider's external_source_id (e.g. the ER
+    # event UUID) — Gundi propagates that same string on both Event and
+    # EventUpdate payloads.
+    cmore_message_id = _extract_message_id(response)
+    if event.external_source_id and cmore_message_id is not None:
+        await state_manager.set_state(
+            integration_id=str(integration.id),
+            action_id="deliver",
+            source_id=event.external_source_id,
+            state={"cmore_message_id": cmore_message_id},
+        )
+
     return {"event_posted": True, "cmore_response": response}
+
+
+def _extract_message_id(post_event_response):
+    """Pull the CMORE messageId out of a post_event response.
+
+    CMORE returns ``{"messageId": <int>, ...}`` on success; be defensive in
+    case the response shape shifts or the body is empty.
+    """
+    if isinstance(post_event_response, dict):
+        return post_event_response.get("messageId") or post_event_response.get("id")
+    return None
+
+
+def _format_event_update_comment(changes: dict) -> Optional[str]:
+    """Render a Gundi EventUpdate.changes dict as CMORE comment text.
+
+    Per GUNDI-5386 the upstream ER runner emits one update_event per change,
+    so a given changes dict carries exactly one of these keys:
+
+    - ``notes``: list of ER note dicts. One note per emission.
+    - ``status`` / ``priority`` / ``title``: the new field value.
+
+    Returns ``None`` if the changes dict has no recognised field — caller
+    should treat as a no-op (and log).
+    """
+    if not isinstance(changes, dict):
+        return None
+
+    notes = changes.get("notes")
+    if notes and isinstance(notes, list):
+        note = notes[0] or {}
+        text = (note.get("text") or "").strip()
+        # ER notes don't carry a top-level "author" field directly; the
+        # first entry in the note's ``updates`` history is the "Created"
+        # event whose user is the author. Best-effort extraction.
+        author = _extract_note_author(note)
+        created_at = note.get("created_at") or ""
+        if author and created_at:
+            return f"{author} ({created_at}): {text}".strip()
+        if author:
+            return f"{author}: {text}".strip()
+        if created_at:
+            return f"{created_at}: {text}".strip()
+        return text or None
+
+    if "status" in changes:
+        return f"Status changed to {changes['status']}"
+    if "priority" in changes:
+        return f"Priority changed to {changes['priority']}"
+    if "title" in changes:
+        return f"Title changed to '{changes['title']}'"
+    return None
+
+
+def _extract_note_author(note: dict) -> str:
+    """Best-effort: find the author from an ER note's updates history."""
+    updates = note.get("updates") or []
+    for entry in updates:
+        user = entry.get("user") or {}
+        username = user.get("username")
+        if username:
+            return username
+    return ""
+
+
+async def _push_event_update_as_comment(
+    integration: Integration,
+    action_config: DeliverConfig,
+    event_update: schemas.v2.EventUpdate,
+):
+    """Forward a Gundi EventUpdate to CMORE as a comment on the original event.
+
+    Looks up the CMORE messageId we stored at ``_push_event`` time, formats
+    the changes dict as comment text, and POSTs via ``CmoreClient.post_comment``.
+
+    A missing mapping (e.g. CMORE never received the original Event because
+    of a race or a backfill ordering issue) is logged as WARNING and dropped
+    rather than crashing the handler.
+    """
+    external_source_id = event_update.external_source_id
+    if not external_source_id:
+        logger.warning(
+            "EventUpdate without external_source_id; cannot route to a CMORE event. Dropping."
+        )
+        return {"dropped": True, "reason": "missing_external_source_id"}
+
+    state = await state_manager.get_state(
+        integration_id=str(integration.id),
+        action_id="deliver",
+        source_id=external_source_id,
+    )
+    cmore_message_id = state.get("cmore_message_id") if state else None
+    if not cmore_message_id:
+        await log_action_activity(
+            integration_id=str(integration.id),
+            action_id="deliver",
+            title="CMORE event not yet seen — skipping update",
+            level=LogLevel.WARNING,
+            data={"external_source_id": external_source_id},
+        )
+        return {"dropped": True, "reason": "cmore_message_id_not_found"}
+
+    comment_text = _format_event_update_comment(event_update.changes or {})
+    if not comment_text:
+        logger.info(
+            "EventUpdate.changes (%r) produced no recognised comment text; skipping.",
+            event_update.changes,
+        )
+        return {"dropped": True, "reason": "unrecognised_changes"}
+
+    auth = _get_auth_config(integration)
+    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+        cmore_comment = CmoreComment(
+            description=comment_text,
+            rootMessageId=int(cmore_message_id),
+            uploadType=UploadType.GENERATED,
+        )
+        response = await client.post_comment(cmore_comment)
+        logger.info(
+            "Posted CMORE comment (root_message_id=%s, len=%d): cmore_response=%r",
+            cmore_message_id,
+            len(comment_text),
+            response,
+        )
+
+    return {"comment_posted": True, "cmore_message_id": cmore_message_id, "cmore_response": response}
 
 
 @activity_logger()
@@ -420,7 +561,12 @@ async def action_deliver(
     if isinstance(payload, schemas.v2.Event):
         return await _push_event(integration, action_config, payload)
 
-    # Graceful drop for EventUpdate, Attachment, TextMessage
+    if isinstance(payload, schemas.v2.EventUpdate):
+        # ER → CMORE comment forwarding (GUNDI-5386). One EventUpdate from
+        # the ER runner per logical change; one CMORE comment per EventUpdate.
+        return await _push_event_update_as_comment(integration, action_config, payload)
+
+    # Graceful drop for Attachment, TextMessage (no CMORE analogue yet).
     payload_type = type(payload).__name__
     await log_action_activity(
         integration_id=str(integration.id),

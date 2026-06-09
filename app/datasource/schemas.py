@@ -80,6 +80,18 @@ class CmoreEvent(BaseModel):
     tags: Optional[List[CmoreEventTag]] = None
 
 
+class CmoreComment(BaseModel):
+    """Request body for POST /comment.
+
+    CMORE represents follow-up annotations on an event as comments. This
+    integration uses them to forward EarthRanger event edits (new notes,
+    field changes) to the corresponding CMORE event.
+    """
+    description: str
+    rootMessageId: int
+    uploadType: UploadType = UploadType.GENERATED
+
+
 class CmoreVirtualClientRequest(BaseModel):
     trackSource: str
     trackNo: int
