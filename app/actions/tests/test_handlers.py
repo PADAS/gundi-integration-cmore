@@ -529,6 +529,29 @@ async def test_deliver_event_records_mapping_for_followup_updates(
     call_kwargs = state.set_state.call_args.kwargs
     assert call_kwargs["source_id"] == "er-uuid-new"
     assert call_kwargs["state"] == {"cmore_message_id": 99999}
+    # Mapping is bounded by a TTL so the Redis keyspace doesn't grow forever.
+    from app.actions.handlers import CMORE_EVENT_MAPPING_TTL_SECONDS
+    assert call_kwargs["ttl_seconds"] == CMORE_EVENT_MAPPING_TTL_SECONDS
+
+
+def test_extract_message_id_coerces_to_int():
+    """CMORE post_event responses get normalized to int messageId or None."""
+    from app.actions.handlers import _extract_message_id
+
+    assert _extract_message_id({"messageId": 14697}) == 14697
+    # String-typed numeric messageIds coerce cleanly.
+    assert _extract_message_id({"messageId": "14697"}) == 14697
+    # Non-integer values return None (and log; not asserted here) rather than
+    # storing garbage that would crash later at CmoreComment(rootMessageId=...).
+    assert _extract_message_id({"messageId": "not-a-number"}) is None
+    assert _extract_message_id({"messageId": None}) is None
+    # Missing key, non-dict input.
+    assert _extract_message_id({}) is None
+    assert _extract_message_id(None) is None
+    assert _extract_message_id("not-a-dict") is None
+    # The pre-PR 'or response.get("id")' fallback is intentionally gone —
+    # CMORE's documented response is `messageId`, full stop.
+    assert _extract_message_id({"id": 12345}) is None
 
 
 @pytest.mark.asyncio

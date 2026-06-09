@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 TRACK_SOURCE = "Gundi"
 
+# TTL for the per-event external_source_id → cmore_message_id mapping. Long
+# enough that any realistic edit window (notes, status flips) lands while we
+# can still find the target CMORE event; short enough that the keyspace
+# eventually prunes itself for events that nobody touches again.
+CMORE_EVENT_MAPPING_TTL_SECONDS = 90 * 24 * 60 * 60  # 90 days
+
 state_manager = IntegrationStateManager()
 
 
@@ -396,6 +402,7 @@ async def _push_event(
             action_id="deliver",
             source_id=event.external_source_id,
             state={"cmore_message_id": cmore_message_id},
+            ttl_seconds=CMORE_EVENT_MAPPING_TTL_SECONDS,
         )
 
     return {"event_posted": True, "cmore_response": response}
@@ -404,12 +411,25 @@ async def _push_event(
 def _extract_message_id(post_event_response):
     """Pull the CMORE messageId out of a post_event response.
 
-    CMORE returns ``{"messageId": <int>, ...}`` on success; be defensive in
-    case the response shape shifts or the body is empty.
+    CMORE returns ``{"messageId": <int>, ...}`` on success. Coerces to int
+    here so callers can rely on an integer (or None) — guards against
+    string-typed messageIds slipping into Redis state and crashing
+    downstream CmoreComment construction with a ValueError.
     """
-    if isinstance(post_event_response, dict):
-        return post_event_response.get("messageId") or post_event_response.get("id")
-    return None
+    if not isinstance(post_event_response, dict):
+        return None
+    raw = post_event_response.get("messageId")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.error(
+            "CMORE post_event response had non-integer messageId=%r; "
+            "skipping external_source_id → cmore_message_id mapping write.",
+            raw,
+        )
+        return None
 
 
 def _format_event_update_comment(changes: dict) -> Optional[str]:
@@ -513,7 +533,7 @@ async def _push_event_update_as_comment(
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         cmore_comment = CmoreComment(
             description=comment_text,
-            rootMessageId=int(cmore_message_id),
+            rootMessageId=cmore_message_id,
             uploadType=UploadType.GENERATED,
         )
         response = await client.post_comment(cmore_comment)
