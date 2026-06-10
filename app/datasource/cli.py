@@ -433,11 +433,6 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if write:
             if gundi is None or dest_integration is None:
                 raise click.UsageError("--write requires --connection (to locate the CMORE integration).")
-            if not hasattr(gundi, "update_integration_configuration"):
-                raise click.UsageError(
-                    "--write requires gundi-client-v2>=3.3.0 (PR PADAS/gundi-client#47). "
-                    "Until it's released, use --out and paste the mapping into the portal."
-                )
             config_id, deliver_data = _find_action_config(dest_integration, ("push_events", "deliver", "push"))
             if config_id is None:
                 raise click.UsageError("Could not find a deliver/push action configuration on the CMORE integration.")
