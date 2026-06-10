@@ -334,6 +334,25 @@ async def _build_event_tag(
     return CmoreEventTag(tagId=tag_info.id, values=values)
 
 
+def _build_event_description(event: schemas.v2.Event) -> str:
+    """Render the CMORE event description: title (or fallback) + an ER deep-link
+    on its own line when the provider runner attached one.
+
+    The deep-link arrives via ``event.provider_metadata.source_event_url``
+    (populated by the ER runner when its integration base_url is configured).
+    Operators clicking it land on the source ER event in the ER web UI.
+
+    Title fallback chain matches the prior behavior: title → event_type slug
+    → "Gundi Event".
+    """
+    title = event.title or event.event_type or "Gundi Event"
+    provider_metadata = event.provider_metadata or {}
+    source_event_url = provider_metadata.get("source_event_url") if isinstance(provider_metadata, dict) else None
+    if source_event_url:
+        return f"{title}\n\nSource: {source_event_url}"
+    return title
+
+
 async def _push_event(
     integration: Integration,
     action_config: DeliverConfig,
@@ -374,7 +393,7 @@ async def _push_event(
 
         location = event.location
         cmore_event = CmoreEvent(
-            description=event.title or event.event_type or "Gundi Event",
+            description=_build_event_description(event),
             latitude=location.lat if location else None,
             longitude=location.lon if location else None,
             dateOccurred=event.recorded_at,
