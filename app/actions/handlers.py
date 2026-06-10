@@ -374,6 +374,18 @@ async def _push_event(
 ):
     auth = _get_auth_config(integration)
 
+    # Diagnostic: log what we received from Gundi so missing/empty
+    # provider_metadata can be traced upstream (cdip-routing's gundi-core
+    # version must include the field for it to flow through here).
+    logger.info(
+        "_push_event received: external_source_id=%r event_type=%r title=%r "
+        "provider_metadata=%r",
+        event.external_source_id,
+        event.event_type,
+        event.title,
+        event.provider_metadata,
+    )
+
     mapping = None
     if action_config.event_type_to_tag and event.event_type:
         mapping = next(
@@ -415,6 +427,12 @@ async def _push_event(
             ownerGroupId=auth.owner_group_id,
             tags=tags,
         )
+        # Diagnostic: log the outbound description verbatim so missing/truncated
+        # URLs in CMORE's UI can be cross-checked against what we actually sent.
+        logger.info(
+            "Posting CMORE event: description=%r",
+            cmore_event.description,
+        )
         response = await client.post_event(cmore_event)
         logger.info(
             "Posted CMORE event (event_type=%r, has_tag=%s): cmore_response=%r",
@@ -430,13 +448,30 @@ async def _push_event(
         # the URL was attached upstream AND we got a messageId back.
         source_event_url = _get_source_event_url(event)
         if source_event_url and cmore_message_id is not None:
+            comment_body = f"Source: {source_event_url}"
+            # Diagnostic: log the outbound comment body so it can be
+            # cross-checked against what shows up in CMORE's UI.
+            logger.info(
+                "Posting CMORE deep-link comment: description=%r root_message_id=%s",
+                comment_body,
+                cmore_message_id,
+            )
             await client.post_comment(CmoreComment(
-                description=f"Source: {source_event_url}",
+                description=comment_body,
                 rootMessageId=cmore_message_id,
                 uploadType=UploadType.GENERATED,
             ))
             logger.info(
                 "Posted CMORE deep-link comment (root_message_id=%s).",
+                cmore_message_id,
+            )
+        else:
+            # Explicit "we didn't post a comment" log so an absent URL is
+            # distinguishable from a posted-but-invisible URL.
+            logger.info(
+                "Skipping CMORE deep-link comment: source_event_url=%r "
+                "cmore_message_id=%r",
+                source_event_url,
                 cmore_message_id,
             )
 
