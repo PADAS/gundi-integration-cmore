@@ -771,9 +771,10 @@ async def test_deliver_handles_empty_route_configuration(
 from app.actions.handlers import _build_event_description
 
 
-def test_build_event_description_appends_source_url_when_present():
-    """The provider runner stamped a deep-link URL → CMORE description carries
-    title + URL on a separate line."""
+def test_build_event_description_joins_title_and_url_with_pipe():
+    """Deep-link is joined to the title with ``" | "`` on a single line.
+    CMORE's list and edit views truncate / hide multi-line descriptions, so a
+    single-line format maximises the chance the URL stays visible."""
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
@@ -784,9 +785,11 @@ def test_build_event_description_appends_source_url_when_present():
         },
     )
     body = _build_event_description(e)
-    assert body.startswith("Coyote Carcass")
-    assert "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6" in body
-    assert "Source:" in body
+    assert body == (
+        "Coyote Carcass | "
+        "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6"
+    )
+    assert "\n" not in body
 
 
 def test_build_event_description_falls_back_to_title_when_no_provider_metadata():
@@ -854,3 +857,90 @@ async def test_deliver_event_includes_deep_link_in_cmore_post(
     sent = inner.post_event.call_args.args[0]
     assert "Coyote Carcass" in sent.description
     assert "https://gundi-er.pamdas.org/events/abc" in sent.description
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_also_posts_deep_link_as_comment(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """Belt-and-suspenders for visibility: the deep-link is also posted as a
+    comment on the new CMORE event so it surfaces in detail views even if list
+    views truncate the description."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        location=Location(lat=0.0, lon=0.0),
+        provider_metadata={
+            "source_event_url": "https://gundi-er.pamdas.org/events/abc"
+        },
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_comment.assert_awaited_once()
+    sent_comment = inner.post_comment.call_args.args[0]
+    assert sent_comment.rootMessageId == 99999
+    assert "https://gundi-er.pamdas.org/events/abc" in sent_comment.description
+    assert sent_comment.description.startswith("Source:")
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_skips_deep_link_comment_when_no_url(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """Events without provider_metadata don't get a redundant comment."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        location=Location(lat=0.0, lon=0.0),
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    inner.post_comment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_skips_deep_link_comment_when_no_message_id(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """If CMORE returns a response without messageId, skip the comment (can't
+    target it). Description still carries the pipe-delimited URL though."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker, post_event_return={"status": "ok-but-weird"})
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        location=Location(lat=0.0, lon=0.0),
+        provider_metadata={
+            "source_event_url": "https://gundi-er.pamdas.org/events/abc"
+        },
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    inner.post_comment.assert_not_awaited()

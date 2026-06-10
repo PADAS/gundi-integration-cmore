@@ -334,22 +334,36 @@ async def _build_event_tag(
     return CmoreEventTag(tagId=tag_info.id, values=values)
 
 
+def _get_source_event_url(event: schemas.v2.Event) -> Optional[str]:
+    """Pull the provider deep-link out of event.provider_metadata.
+
+    Returns ``None`` if the field is missing, the dict is malformed, or the
+    URL is blank. Callers should treat ``None`` as "no deep-link to render."
+    """
+    pm = event.provider_metadata or {}
+    if not isinstance(pm, dict):
+        return None
+    url = pm.get("source_event_url")
+    return url if isinstance(url, str) and url else None
+
+
 def _build_event_description(event: schemas.v2.Event) -> str:
-    """Render the CMORE event description: title (or fallback) + an ER deep-link
-    on its own line when the provider runner attached one.
+    """Render the CMORE event description.
 
-    The deep-link arrives via ``event.provider_metadata.source_event_url``
-    (populated by the ER runner when its integration base_url is configured).
-    Operators clicking it land on the source ER event in the ER web UI.
+    Format: ``<title> | <source_event_url>`` when the provider runner
+    attached a deep-link. Single line with a pipe separator because CMORE's
+    list and edit views truncate or hide multi-line descriptions — keeping
+    the URL on the same line as the title maximises the chance it stays
+    visible. The deep-link is ALSO posted as a comment immediately after
+    ``post_event`` (see ``_push_event``) so it appears in the detail view
+    even if the description gets truncated.
 
-    Title fallback chain matches the prior behavior: title → event_type slug
-    → "Gundi Event".
+    Title fallback chain unchanged: title → event_type slug → "Gundi Event".
     """
     title = event.title or event.event_type or "Gundi Event"
-    provider_metadata = event.provider_metadata or {}
-    source_event_url = provider_metadata.get("source_event_url") if isinstance(provider_metadata, dict) else None
+    source_event_url = _get_source_event_url(event)
     if source_event_url:
-        return f"{title}\n\nSource: {source_event_url}"
+        return f"{title} | {source_event_url}"
     return title
 
 
@@ -408,13 +422,29 @@ async def _push_event(
             tags is not None,
             response,
         )
+        cmore_message_id = _extract_message_id(response)
+
+        # Belt-and-suspenders: also post the deep-link URL as a comment so it
+        # surfaces in CMORE's event detail view even if list/edit views hide
+        # or truncate the description's pipe-separated link. Only when both
+        # the URL was attached upstream AND we got a messageId back.
+        source_event_url = _get_source_event_url(event)
+        if source_event_url and cmore_message_id is not None:
+            await client.post_comment(CmoreComment(
+                description=f"Source: {source_event_url}",
+                rootMessageId=cmore_message_id,
+                uploadType=UploadType.GENERATED,
+            ))
+            logger.info(
+                "Posted CMORE deep-link comment (root_message_id=%s).",
+                cmore_message_id,
+            )
 
     # Persist the source→messageId mapping so a subsequent EventUpdate for the
     # same source event can be hung off this CMORE event as a comment
     # (GUNDI-5386). Keyed by the provider's external_source_id (e.g. the ER
     # event UUID) — Gundi propagates that same string on both Event and
     # EventUpdate payloads.
-    cmore_message_id = _extract_message_id(response)
     if event.external_source_id and cmore_message_id is not None:
         await state_manager.set_state(
             integration_id=str(integration.id),
