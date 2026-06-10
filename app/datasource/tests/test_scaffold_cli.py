@@ -4,10 +4,15 @@ Exercises the file-input path and the pure merge helper.
 """
 
 import json
+import os
 
 from click.testing import CliRunner
 
 from app.datasource.cli import cli, merge_event_type_mapping
+
+_REAL_SCHEMA = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "docs", "rhino_carcass_schema_from_api.json"
+)
 
 
 def test_merge_event_type_mapping_replaces_same_event_type():
@@ -42,21 +47,10 @@ _TAGS = [{
     }],
 }]
 
-# ER schema dump (rhino_carcass-like).
-_SCHEMA = {"schema": {"properties": {
-    "animal_sex": {"type": "string", "title": "Animal Sex",
-                   "enum": ["male", "female"], "enumNames": {"male": "Male", "female": "Female"}},
-    "age_of_animal": {"type": "string", "title": "Age Of Animal",
-                      "enum": ["b_3_months1_year", "adult"],
-                      "enumNames": {"b_3_months1_year": "Between 3 months and 1 year", "adult": "Adult"}},
-}}}
-
-
 def test_scaffold_mapping_offline_end_to_end(tmp_path):
+    """Run the CLI against the REAL ER schema dump + a minimal Wildlife tag."""
     tags_file = tmp_path / "tags.json"
     tags_file.write_text(json.dumps(_TAGS))
-    schema_file = tmp_path / "schema.json"
-    schema_file.write_text(json.dumps(_SCHEMA))
     out_file = tmp_path / "mapping.json"
 
     runner = CliRunner()
@@ -65,7 +59,7 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
         "--event-type", "rhino_carcass",
         "--tag", "Rhino Carcass",
         "--tags-file", str(tags_file),
-        "--er-schema-file", str(schema_file),
+        "--er-schema-file", _REAL_SCHEMA,
         "--out", str(out_file),
         "--non-interactive",
     ])
@@ -76,9 +70,10 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
     assert entry["tag_name"] == "Rhino Carcass"
 
     by_field = {fm["cmore_field_name"]: fm for fm in entry["field_mappings"]}
-    # animal_sex auto-resolves both values → no value_mappings emitted.
-    assert "Animal Sex" in by_field
-    assert "value_mappings" not in by_field["Animal Sex"]
-    # age_of_animal: 'adult' is a freebie (omitted); the bucket is unresolved → blank.
-    age = by_field["Animal Age"]
-    assert {"from_value": "b_3_months1_year", "to_value": ""} in age["value_mappings"]
+    # animal_sex: female/male auto-resolve (display match); only 'Unknown' is left.
+    sex_maps = by_field["Animal Sex"].get("value_mappings", [])
+    assert sex_maps == [{"from_value": "Unknown", "to_value": ""}]
+    # age_of_animal: none of ER's six buckets match Adult/Calf → all blank.
+    age_maps = by_field["Animal Age"]["value_mappings"]
+    assert {"from_value": "b_3_months1_year", "to_value": ""} in age_maps
+    assert len(age_maps) == 6

@@ -1,0 +1,454 @@
+{
+    "json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+            "cause_of_death": {
+                "deprecated": false,
+                "description": "",
+                "title": "Cause Of Death",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "disease",
+                            "fence",
+                            "fighting",
+                            "fire",
+                            "gunshot",
+                            "injury",
+                            "oldage",
+                            "predation",
+                            "snare",
+                            "nutrition",
+                            "vehicle",
+                            "weather",
+                            "unknown",
+                            "other"
+                        ],
+                        "x-enumExtra": {
+                            "disease": {
+                                "display": "Disease",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "fence": {
+                                "display": "Fence",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "fighting": {
+                                "display": "Fighting",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "fire": {
+                                "display": "Fire",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "gunshot": {
+                                "display": "Gunshot",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "injury": {
+                                "display": "Injury",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "oldage": {
+                                "display": "Old age",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "predation": {
+                                "display": "Predation",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "snare": {
+                                "display": "Snare",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "nutrition": {
+                                "display": "Nutrition",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "vehicle": {
+                                "display": "Vehicle",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "weather": {
+                                "display": "Weather",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "unknown": {
+                                "display": "Unknown",
+                                "description": "carcass_causeofdeath"
+                            },
+                            "other": {
+                                "display": "Other",
+                                "description": "carcass_causeofdeath"
+                            }
+                        }
+                    }
+                ]
+            },
+            "age_of_carcass": {
+                "deprecated": false,
+                "description": "",
+                "title": "Age Of Carcass",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "very_fresh",
+                            "fresh",
+                            "old",
+                            "very_old"
+                        ],
+                        "x-enumExtra": {
+                            "very_fresh": {
+                                "display": "Very fresh",
+                                "description": "leopardtrack_trackage"
+                            },
+                            "fresh": {
+                                "display": "Fresh",
+                                "description": "leopardtrack_trackage"
+                            },
+                            "old": {
+                                "display": "Old",
+                                "description": "leopardtrack_trackage"
+                            },
+                            "very_old": {
+                                "display": "Very old",
+                                "description": "leopardtrack_trackage"
+                            }
+                        }
+                    }
+                ]
+            },
+            "animal_sex": {
+                "deprecated": false,
+                "description": "",
+                "title": "Animal Sex",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "female",
+                            "male",
+                            "Unknown"
+                        ],
+                        "x-enumExtra": {
+                            "female": {
+                                "display": "Female",
+                                "description": "allrep_sex"
+                            },
+                            "male": {
+                                "display": "Male",
+                                "description": "allrep_sex"
+                            },
+                            "Unknown": {
+                                "display": "Unknown",
+                                "description": "allrep_sex"
+                            }
+                        }
+                    }
+                ]
+            },
+            "animal_id": {
+                "default": "",
+                "deprecated": false,
+                "description": "",
+                "title": "Animal ID",
+                "type": "string"
+            },
+            "age_of_animal": {
+                "deprecated": false,
+                "description": "",
+                "title": "Age Of Animal",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "a_0-3_months",
+                            "b_3_months1_year",
+                            "c_1-2_years",
+                            "d_2-3.5years",
+                            "e_3.5-7years",
+                            "f_7_years_and_more"
+                        ],
+                        "x-enumExtra": {
+                            "a_0-3_months": {
+                                "display": "A: 0-3 Months",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            },
+                            "b_3_months1_year": {
+                                "display": "B: 3 Months - 1 Year",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            },
+                            "c_1-2_years": {
+                                "display": "C: 1 - 2 Years",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            },
+                            "d_2-3.5years": {
+                                "display": "D: 2 - 3.5 Years",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            },
+                            "e_3.5-7years": {
+                                "display": "E: 3.5 - 7 Years",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            },
+                            "f_7_years_and_more": {
+                                "display": "F: 7 Years and More",
+                                "description": "rhinomonitoringrep_rhino1ageclass"
+                            }
+                        }
+                    }
+                ]
+            },
+            "animal_common_name": {
+                "deprecated": false,
+                "description": "",
+                "title": "Animal Common Name",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "Black Rhino",
+                            "White Rhino"
+                        ],
+                        "x-enumExtra": {
+                            "Black Rhino": {
+                                "display": "Black Rhino",
+                                "description": "rhinospecies"
+                            },
+                            "White Rhino": {
+                                "display": "White Rhino",
+                                "description": "rhinospecies"
+                            }
+                        }
+                    }
+                ]
+            },
+            "reported_to_opswpu": {
+                "deprecated": false,
+                "description": "",
+                "title": "Reported to OPS/WPU",
+                "type": "string",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "title": "Choices",
+                        "description": "All choices schema list",
+                        "enum": [
+                            "yes",
+                            "no"
+                        ],
+                        "x-enumExtra": {
+                            "yes": {
+                                "display": "Yes",
+                                "description": "yesno"
+                            },
+                            "no": {
+                                "display": "No",
+                                "description": "yesno"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "required": [
+            "cause_of_death",
+            "age_of_carcass",
+            "animal_sex",
+            "age_of_animal",
+            "animal_common_name",
+            "reported_to_opswpu"
+        ],
+        "type": "object"
+    },
+    "ui": {
+        "fields": {
+            "cause_of_death": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "carcass_causeofdeath"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            },
+            "age_of_carcass": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "leopardtrack_trackage"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            },
+            "animal_sex": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "allrep_sex"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            },
+            "animal_id": {
+                "inputType": "SHORT_TEXT",
+                "placeholder": "",
+                "type": "TEXT",
+                "parent": "section-1"
+            },
+            "age_of_animal": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "rhinomonitoringrep_rhino1ageclass"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            },
+            "animal_common_name": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "rhinospecies"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            },
+            "reported_to_opswpu": {
+                "choices": {
+                    "eventTypeCategories": [],
+                    "existingChoiceList": [
+                        "yesno"
+                    ],
+                    "featureCategories": [],
+                    "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+                    "subjectGroups": [],
+                    "subjectSubtypes": [],
+                    "type": "EXISTING_CHOICE_LIST"
+                },
+                "inputType": "DROPDOWN",
+                "placeholder": "",
+                "type": "CHOICE_LIST",
+                "parent": "section-1"
+            }
+        },
+        "headers": {
+            "header-1": {
+                "label": "Contact OPS immediately if carcass found",
+                "section": "section-2",
+                "size": "LARGE"
+            }
+        },
+        "order": [
+            "section-2",
+            "section-1"
+        ],
+        "sections": {
+            "section-1": {
+                "columns": 2,
+                "isActive": true,
+                "label": "",
+                "leftColumn": [
+                    {
+                        "type": "field",
+                        "name": "cause_of_death"
+                    },
+                    {
+                        "name": "age_of_animal",
+                        "type": "field"
+                    },
+                    {
+                        "name": "animal_common_name",
+                        "type": "field"
+                    },
+                    {
+                        "name": "reported_to_opswpu",
+                        "type": "field"
+                    }
+                ],
+                "rightColumn": [
+                    {
+                        "type": "field",
+                        "name": "age_of_carcass"
+                    },
+                    {
+                        "type": "field",
+                        "name": "animal_sex"
+                    },
+                    {
+                        "type": "field",
+                        "name": "animal_id"
+                    }
+                ]
+            },
+            "section-2": {
+                "columns": 1,
+                "isActive": true,
+                "label": "",
+                "leftColumn": [
+                    {
+                        "name": "header-1",
+                        "type": "header"
+                    }
+                ],
+                "rightColumn": []
+            }
+        }
+    }
+}

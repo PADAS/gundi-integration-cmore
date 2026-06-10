@@ -1,7 +1,14 @@
 """Tests for the ER→CMORE mapping scaffold, grounded in the real ER
 rhino_carcass event-type schema and the CMORE Wildlife 'Rhino Carcass' tag."""
 
+import json
+import os
+
 from app.datasource.er_schema import ERChoice, ERField, parse_er_event_schema
+
+_REAL_SCHEMA = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "docs", "rhino_carcass_schema_from_api.json"
+)
 from app.datasource.mapping_scaffold import (
     build_scaffold,
     suggest_cmore_field,
@@ -49,6 +56,32 @@ def test_parse_er_schema_handles_double_nested_and_list_enumnames():
 
 def test_parse_er_schema_empty_when_no_properties():
     assert parse_er_event_schema({"nonsense": True}) == []
+
+
+def test_parse_real_er_api_schema_inline_enum():
+    """The real ER v2 schema (pre_render + s_format=enum) wraps each choice
+    field's values under anyOf[0] as enum + x-enumExtra, inside a top-level
+    'json' envelope. Parse it end-to-end."""
+    with open(_REAL_SCHEMA) as fh:
+        raw = json.load(fh)
+    fields = {f.key: f for f in parse_er_event_schema(raw)}
+
+    # animal_id is free-text (no choices).
+    assert fields["animal_id"].is_enum is False
+
+    # animal_sex resolves to value/display pairs from x-enumExtra.
+    sex = fields["animal_sex"]
+    assert ERChoice("female", "Female") in sex.choices
+    assert ERChoice("male", "Male") in sex.choices
+
+    # age_of_animal carries all six ER buckets with their display labels.
+    age = {c.value: c.display for c in fields["age_of_animal"].choices}
+    assert age["b_3_months1_year"] == "B: 3 Months - 1 Year"
+    assert len(age) == 6
+
+    # animal_common_name uses the value as display ("Black Rhino").
+    species = {c.value for c in fields["animal_common_name"].choices}
+    assert species == {"Black Rhino", "White Rhino"}
 
 
 # --- field matching --------------------------------------------------------

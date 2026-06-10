@@ -392,9 +392,14 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         else:
             if not er_base or not er_token:
                 raise click.UsageError("ER base_url/token unavailable; pass --er-schema-file.")
-            url = f"{er_base.rstrip('/')}/api/v1.0/activity/events/schema/eventtype/{event_type}"
+            # The v2 schema endpoint with pre_render + s_format=enum inlines each
+            # choice field's values (enum + x-enumExtra), so no separate choices
+            # fetch is needed.
+            url = f"{er_base.rstrip('/')}/api/v2.0/activity/eventtypes/{event_type}/schema"
             async with httpx.AsyncClient(headers={"Authorization": f"Bearer {er_token}"}) as http:
-                resp = await http.get(url, timeout=30.0)
+                resp = await http.get(
+                    url, params={"pre_render": "true", "s_format": "enum"}, timeout=30.0
+                )
                 resp.raise_for_status()
                 raw_schema = resp.json()
         er_fields = parse_er_event_schema(raw_schema)

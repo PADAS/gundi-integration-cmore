@@ -1,0 +1,264 @@
+{
+  "json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "cause_of_death": {
+        "deprecated": false,
+        "description": "",
+        "title": "Cause Of Death",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=carcass_causeofdeath"
+          }
+        ]
+      },
+      "age_of_carcass": {
+        "deprecated": false,
+        "description": "",
+        "title": "Age Of Carcass",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=leopardtrack_trackage"
+          }
+        ]
+      },
+      "animal_sex": {
+        "deprecated": false,
+        "description": "",
+        "title": "Animal Sex",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=allrep_sex"
+          }
+        ]
+      },
+      "animal_id": {
+        "default": "",
+        "deprecated": false,
+        "description": "",
+        "title": "Animal ID",
+        "type": "string"
+      },
+      "age_of_animal": {
+        "deprecated": false,
+        "description": "",
+        "title": "Age Of Animal",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=rhinomonitoringrep_rhino1ageclass"
+          }
+        ]
+      },
+      "animal_common_name": {
+        "deprecated": false,
+        "description": "",
+        "title": "Animal Common Name",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=rhinospecies"
+          }
+        ]
+      },
+      "reported_to_opswpu": {
+        "deprecated": false,
+        "description": "",
+        "title": "Reported to OPS/WPU",
+        "type": "string",
+        "anyOf": [
+          {
+            "$ref": "https://lapalala.pamdas.org/api/v2.0/schemas/choices.json?field=yesno"
+          }
+        ]
+      }
+    },
+    "required": [
+      "cause_of_death",
+      "age_of_carcass",
+      "animal_sex",
+      "age_of_animal",
+      "animal_common_name",
+      "reported_to_opswpu"
+    ],
+    "type": "object",
+    "unevaluatedProperties": false
+  },
+  "ui": {
+    "fields": {
+      "cause_of_death": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "carcass_causeofdeath"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      },
+      "age_of_carcass": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "leopardtrack_trackage"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      },
+      "animal_sex": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "allrep_sex"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      },
+      "animal_id": {
+        "inputType": "SHORT_TEXT",
+        "placeholder": "",
+        "type": "TEXT",
+        "parent": "section-1"
+      },
+      "age_of_animal": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "rhinomonitoringrep_rhino1ageclass"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      },
+      "animal_common_name": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "rhinospecies"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      },
+      "reported_to_opswpu": {
+        "choices": {
+          "eventTypeCategories": [],
+          "existingChoiceList": [
+            "yesno"
+          ],
+          "featureCategories": [],
+          "myDataType": "SUBJECTS_FROM_SUBJECT_GROUP",
+          "subjectGroups": [],
+          "subjectSubtypes": [],
+          "type": "EXISTING_CHOICE_LIST"
+        },
+        "inputType": "DROPDOWN",
+        "placeholder": "",
+        "type": "CHOICE_LIST",
+        "parent": "section-1"
+      }
+    },
+    "headers": {
+      "header-1": {
+        "label": "Contact OPS immediately if carcass found",
+        "section": "section-2",
+        "size": "LARGE"
+      }
+    },
+    "order": [
+      "section-2",
+      "section-1"
+    ],
+    "sections": {
+      "section-1": {
+        "columns": 2,
+        "isActive": true,
+        "label": "",
+        "leftColumn": [
+          {
+            "type": "field",
+            "name": "cause_of_death"
+          },
+          {
+            "name": "age_of_animal",
+            "type": "field"
+          },
+          {
+            "name": "animal_common_name",
+            "type": "field"
+          },
+          {
+            "name": "reported_to_opswpu",
+            "type": "field"
+          }
+        ],
+        "rightColumn": [
+          {
+            "type": "field",
+            "name": "age_of_carcass"
+          },
+          {
+            "type": "field",
+            "name": "animal_sex"
+          },
+          {
+            "type": "field",
+            "name": "animal_id"
+          }
+        ]
+      },
+      "section-2": {
+        "columns": 1,
+        "isActive": true,
+        "label": "",
+        "leftColumn": [
+          {
+            "name": "header-1",
+            "type": "header"
+          }
+        ],
+        "rightColumn": []
+      }
+    }
+  }
+}
