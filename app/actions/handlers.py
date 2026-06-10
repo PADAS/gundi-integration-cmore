@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 import traceback
 from datetime import datetime
 from typing import Optional
@@ -269,6 +270,93 @@ def _stringify_for_cmore(value) -> Optional[str]:
     return str(value)
 
 
+def _normalize_for_match(value: str) -> str:
+    """Casefold + drop whitespace/punctuation so source values can match CMORE
+    options despite cosmetic differences (e.g. 'sub_adult' ↔ 'Sub-Adult')."""
+    return re.sub(r"[^a-z0-9]+", "", str(value).strip().lower())
+
+
+def _resolve_field_value(field_info, candidate: str) -> Optional[str]:
+    """Coerce/validate a single candidate value for one CMORE field, by data type.
+
+    Returns the string to send to CMORE, or None to skip the value (logging why).
+    """
+    data_type = field_info.data_type or "String"
+
+    if data_type in ("Lookup", "FixedLookup"):
+        # CMORE matches lookups by their value string (verified empirically),
+        # so resolve to the canonical option whose value matches the candidate.
+        target = _normalize_for_match(candidate)
+        for lookup in field_info.lookups or []:
+            option = lookup.get("value")
+            if option is not None and _normalize_for_match(option) == target:
+                return option
+        logger.warning(
+            "CMORE field %r (%s) has no option matching %r; dropping value. "
+            "Valid options: %s",
+            field_info.name,
+            data_type,
+            candidate,
+            [lk.get("value") for lk in (field_info.lookups or [])],
+        )
+        return None
+
+    if data_type == "Number":
+        try:
+            float(candidate)
+        except (TypeError, ValueError):
+            logger.warning(
+                "CMORE field %r is Number but value %r is not numeric; dropping value.",
+                field_info.name,
+                candidate,
+            )
+            return None
+        return candidate
+
+    if data_type == "Boolean":
+        norm = _normalize_for_match(candidate)
+        if norm in ("true", "yes", "y", "1"):
+            return "true"
+        if norm in ("false", "no", "n", "0"):
+            return "false"
+        logger.warning(
+            "CMORE field %r is Boolean but value %r is not boolean-like; dropping value.",
+            field_info.name,
+            candidate,
+        )
+        return None
+
+    # String / Text / unknown — send as-is.
+    return candidate
+
+
+def _resolve_field_values(field_info, mapping_field, raw_value) -> list:
+    """Resolve one event_details value into the CmoreTagValue value strings to
+    send for a field, applying source→CMORE value translations, multi-value
+    handling, and per-type coercion."""
+    value_map = {
+        _normalize_for_match(vm.from_value): vm.to_value
+        for vm in (mapping_field.value_mappings or [])
+    }
+
+    # Multi-value fields may carry a list; everything else is treated as scalar.
+    if field_info.allow_multiple and isinstance(raw_value, (list, tuple)):
+        raw_items = list(raw_value)
+    else:
+        raw_items = [raw_value]
+
+    resolved = []
+    for item in raw_items:
+        item_str = _stringify_for_cmore(item)
+        if item_str is None:
+            continue
+        candidate = value_map.get(_normalize_for_match(item_str), item_str)
+        value = _resolve_field_value(field_info, candidate)
+        if value is not None:
+            resolved.append(value)
+    return resolved
+
+
 async def _build_event_tag(
     client: CmoreClient,
     base_url: str,
@@ -317,10 +405,10 @@ async def _build_event_tag(
             )
             continue
         raw_value = details.get(ed_key)
-        stringified = _stringify_for_cmore(raw_value)
-        if stringified is None:
+        if raw_value is None:
             continue
-        values.append(CmoreTagValue(fieldId=field_info.id, value=stringified))
+        for value in _resolve_field_values(field_info, fm, raw_value):
+            values.append(CmoreTagValue(fieldId=field_info.id, value=value))
 
     logger.info(
         "Attached CMORE tag %r (tagId=%d, typeLimiter=%s) with %d field value(s) "

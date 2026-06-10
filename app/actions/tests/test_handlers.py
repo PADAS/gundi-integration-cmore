@@ -381,6 +381,167 @@ def test_stringify_for_cmore_handles_common_types():
     assert _stringify_for_cmore({"k": "v"}) == '{"k": "v"}'
 
 
+# ---------------------------------------------------------------------------
+# Type-aware field-value resolution: Lookup/Number/Boolean coercion, value
+# translation maps, and multi-value handling. Grounded in the real ER
+# "rhino_carcass" event_details and the CMORE Wildlife "Rhino Carcass" tag.
+# ---------------------------------------------------------------------------
+
+from app.actions.configurations import CmoreFieldMapping, CmoreValueMapping
+from app.actions.handlers import _resolve_field_value, _resolve_field_values
+from app.datasource.tag_index import FieldInfo
+
+
+def _lookup(*values):
+    return [{"id": i, "value": v} for i, v in enumerate(values, start=1)]
+
+
+def test_resolve_lookup_matches_case_insensitively():
+    """A source value that differs only in case/punctuation resolves to the
+    canonical CMORE option (e.g. ER 'male' → CMORE 'Male')."""
+    sex = FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                    lookups=_lookup("Male", "Female", "Indeterminable"))
+    assert _resolve_field_value(sex, "male") == "Male"
+    assert _resolve_field_value(sex, "INDETERMINABLE") == "Indeterminable"
+
+
+def test_resolve_lookup_drops_unmatched_value():
+    """A value with no matching option is dropped (returns None)."""
+    sex = FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                    lookups=_lookup("Male", "Female", "Indeterminable"))
+    assert _resolve_field_value(sex, "unknown") is None
+
+
+def test_resolve_number_validates_numeric():
+    snares = FieldInfo(id=264, name="Number of Snares Found", data_type="Number")
+    assert _resolve_field_value(snares, "3") == "3"
+    assert _resolve_field_value(snares, "lots") is None
+
+
+def test_resolve_boolean_coerces_yes_no():
+    vet = FieldInfo(id=1282, name="Veterinarian on Scene", data_type="Boolean")
+    assert _resolve_field_value(vet, "yes") == "true"
+    assert _resolve_field_value(vet, "no") == "false"
+    assert _resolve_field_value(vet, "maybe") is None
+
+
+def test_resolve_field_values_applies_value_mapping_then_lookup():
+    """ER 'b_3_months1_year' → (value map) 'Calf' → (lookup) canonical 'Calf'."""
+    age = FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                    lookups=_lookup("Adult", "Sub-Adult", "Calf"))
+    fm = CmoreFieldMapping(
+        event_details_key="age_of_animal",
+        cmore_field_name="Animal Age",
+        value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
+    )
+    assert _resolve_field_values(age, fm, "b_3_months1_year") == ["Calf"]
+
+
+def test_resolve_field_values_supports_multi_value_lookup():
+    """A multi-value lookup field expands a list into several resolved values."""
+    evidence = FieldInfo(id=261, name="Evidence Type", data_type="Lookup",
+                         allow_multiple=True, lookups=_lookup("Snare", "Trap", "Net"))
+    fm = CmoreFieldMapping(event_details_key="evidence", cmore_field_name="Evidence Type")
+    assert _resolve_field_values(evidence, fm, ["snare", "net"]) == ["Snare", "Net"]
+
+
+@pytest.fixture
+def rhino_carcass_tag_info():
+    """Trimmed CMORE 'Rhino Carcass' tag mirroring the real Wildlife domain."""
+    from app.datasource.tag_index import TagInfo
+
+    return TagInfo(
+        id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
+        fields={
+            "Rhino Spesies": FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
+                                       lookups=_lookup("White", "Black")),
+            "Animal Sex": FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                                    lookups=_lookup("Male", "Female", "Indeterminable")),
+            "Animal Age": FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                                    lookups=_lookup("Adult", "Sub-Adult", "Calf")),
+            "Carcass Age": FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
+                                     lookups=_lookup("Today", "Fresh (less than 3 days)")),
+            "Kill Type": FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
+                                   lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
+            "Skull Tag Number": FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_rhino_carcass_resolves_lookups(
+    mocker, integration, provider_info, metadata, rhino_carcass_tag_info
+):
+    """End-to-end with the real ER rhino_carcass event_details: lookups resolve
+    (via case-match or value-map), an unmappable value is dropped, the String
+    passes through."""
+    from app.actions.configurations import CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    config = DeliverConfig(
+        event_type_to_tag=[
+            CmoreTagMapping(
+                event_type="rhino_carcass",
+                tag_name="Rhino Carcass",
+                field_mappings=[
+                    CmoreFieldMapping(event_details_key="animal_sex", cmore_field_name="Animal Sex"),
+                    CmoreFieldMapping(
+                        event_details_key="animal_common_name", cmore_field_name="Rhino Spesies",
+                        value_mappings=[CmoreValueMapping(from_value="Black Rhino", to_value="Black")],
+                    ),
+                    CmoreFieldMapping(
+                        event_details_key="age_of_animal", cmore_field_name="Animal Age",
+                        value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
+                    ),
+                    CmoreFieldMapping(
+                        event_details_key="age_of_carcass", cmore_field_name="Carcass Age",
+                        value_mappings=[CmoreValueMapping(from_value="very_fresh", to_value="Today")],
+                    ),
+                    # 'fence' maps to no valid Kill Type option → dropped.
+                    CmoreFieldMapping(event_details_key="cause_of_death", cmore_field_name="Kill Type"),
+                    CmoreFieldMapping(event_details_key="animal_id", cmore_field_name="Skull Tag Number"),
+                ],
+            ),
+        ],
+    )
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=rhino_carcass_tag_info)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-rhino",
+        recorded_at=datetime(2026, 6, 10, 20, 3, 25, tzinfo=timezone.utc),
+        location=Location(lat=47.686, lon=-122.359),
+        title="Rhino Carcass",
+        event_type="rhino_carcass",
+        event_details={
+            "animal_id": "RF001",
+            "animal_sex": "male",
+            "age_of_animal": "b_3_months1_year",
+            "age_of_carcass": "very_fresh",
+            "cause_of_death": "fence",
+            "animal_common_name": "Black Rhino",
+            "reported_to_opswpu": "yes",
+        },
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    sent = {v.fieldId: v.value for v in posted.tags[0].values}
+    assert sent == {
+        1261: "Male",   # animal_sex 'male' → 'Male' (case match)
+        294: "Black",   # 'Black Rhino' → 'Black' (value map)
+        1260: "Calf",   # 'b_3_months1_year' → 'Calf' (value map)
+        1262: "Today",  # 'very_fresh' → 'Today' (value map)
+        1278: "RF001",  # animal_id → String passthrough
+        # cause_of_death 'fence' had no valid Kill Type option → dropped
+    }
+
+
 @pytest.mark.asyncio
 async def test_deliver_event_update_logs_warning_when_no_mapping_exists(
     mocker, integration, deliver_config, provider_info, metadata
