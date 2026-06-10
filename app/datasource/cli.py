@@ -282,35 +282,64 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
-def _interactive_fill(result, tag_info):
-    """Walk the scaffold with the operator: confirm/override unmatched fields
-    and fill blank lookup value mappings. Mutates ``result`` in place."""
-    from .mapping_scaffold import FieldScaffold
+def _interactive_fill(result, tag_info, er_fields):
+    """Walk the scaffold with the operator: wire unmatched fields (numbered
+    pick), then fill blank lookup value mappings (options listed once per
+    field; each source value shown with its ER display label). Mutates
+    ``result`` in place."""
+    from .mapping_scaffold import FieldScaffold, suggest_lookup_value, _normalize
 
+    er_by_key = {f.key: f for f in er_fields}
+    LOOKUP_TYPES = ("Lookup", "FixedLookup")
+
+    def _lookup_options(field_info):
+        return [lk.get("value") for lk in (getattr(field_info, "lookups", None) or [])]
+
+    # 1) Wire unmatched ER fields by picking from the uncovered CMORE fields.
+    uncovered = list(result.uncovered_cmore_fields)
     for er_key in list(result.unmatched_er_fields):
-        click.echo(f"\nUnmatched ER field: {er_key}")
-        choice = click.prompt(
-            "  Map to CMORE field (name, or blank to skip)", default="", show_default=False
-        ).strip()
-        if not choice:
+        if not uncovered:
+            break
+        click.echo(f"\nER field '{er_key}' has no CMORE match. Pick a CMORE field:")
+        for i, name in enumerate(uncovered, start=1):
+            click.echo(f"  {i}. {name} ({tag_info.field_by_name(name).data_type})")
+        sel = click.prompt("  number (Enter to skip)", default="", show_default=False).strip()
+        if not (sel.isdigit() and 1 <= int(sel) <= len(uncovered)):
             continue
-        if tag_info.field_by_name(choice) is None:
-            click.echo(f"  '{choice}' is not a field on '{tag_info.name}'; skipping.")
-            continue
+        name = uncovered.pop(int(sel) - 1)
         result.unmatched_er_fields.remove(er_key)
-        result.fields.append(FieldScaffold(event_details_key=er_key, cmore_field_name=choice))
+        scaffold = FieldScaffold(event_details_key=er_key, cmore_field_name=name)
+        # Seed value mappings for a newly-wired lookup field from its ER choices.
+        field_info = tag_info.field_by_name(name)
+        er_field = er_by_key.get(er_key)
+        if field_info.data_type in LOOKUP_TYPES and er_field and er_field.choices:
+            for choice in er_field.choices:
+                option = suggest_lookup_value(choice, field_info)
+                if option is None:
+                    scaffold.value_mappings.append({"from_value": choice.value, "to_value": ""})
+                elif _normalize(choice.value) != _normalize(option):
+                    scaffold.value_mappings.append({"from_value": choice.value, "to_value": option})
+        result.fields.append(scaffold)
 
+    # 2) Fill blank value mappings — group by field, list options once, show
+    #    each source value's display label so the choice is obvious.
     for field_scaffold in result.fields:
+        blanks = [vm for vm in field_scaffold.value_mappings if not vm["to_value"]]
+        if not blanks:
+            continue
         field_info = tag_info.field_by_name(field_scaffold.cmore_field_name)
-        options = [lk.get("value") for lk in (getattr(field_info, "lookups", None) or [])]
-        for vm in field_scaffold.value_mappings:
-            if vm["to_value"]:
-                continue
-            click.echo(f"\n{field_scaffold.cmore_field_name}: source value '{vm['from_value']}'")
-            for i, opt in enumerate(options, start=1):
-                click.echo(f"  {i}. {opt}")
+        options = _lookup_options(field_info)
+        er_field = er_by_key.get(field_scaffold.event_details_key)
+        displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
+
+        click.echo(f"\n{field_scaffold.cmore_field_name} — pick the CMORE value for each source value:")
+        for i, opt in enumerate(options, start=1):
+            click.echo(f"  {i}. {opt}")
+        for vm in blanks:
+            label = displays.get(vm["from_value"], "")
+            shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
             picked = click.prompt(
-                "  CMORE value (number, exact value, or blank to drop)", default="", show_default=False
+                f"  {shown}  →  number / value (Enter to drop)", default="", show_default=False
             ).strip()
             if picked.isdigit() and 1 <= int(picked) <= len(options):
                 vm["to_value"] = options[int(picked) - 1]
@@ -424,7 +453,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             click.echo("  Uncovered CMORE fields: " + ", ".join(result.uncovered_cmore_fields))
 
         if not non_interactive:
-            _interactive_fill(result, tag_info)
+            _interactive_fill(result, tag_info, er_fields)
 
         entry = result.to_config_entry()
         rendered = json.dumps(entry, indent=2)

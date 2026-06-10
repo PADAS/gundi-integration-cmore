@@ -87,6 +87,57 @@ _TAGS = [{
     }],
 }]
 
+_INTERACTIVE_TAGS = [{"id": 8, "name": "Wildlife", "tags": [{
+    "id": 26, "name": "Rhino Carcass", "typeLimiter": "Incident", "fields": [
+        {"id": 1, "name": "Animal Sex", "dataType": "Lookup", "allowMultipleValues": False,
+         "lookups": [{"id": 1, "value": "Male"}, {"id": 2, "value": "Female"}, {"id": 3, "value": "Indeterminable"}]},
+        {"id": 2, "name": "Rhino Spesies", "dataType": "Lookup", "allowMultipleValues": False,
+         "lookups": [{"id": 4, "value": "White"}, {"id": 5, "value": "Black"}]},
+    ],
+}]}]
+
+# 'animal_sex' matches "Animal Sex"; 'species' shares no tokens with "Rhino
+# Spesies" → unmatched → exercised via the numbered field picker.
+_INTERACTIVE_SCHEMA = {"json": {"properties": {
+    "animal_sex": {"title": "Animal Sex", "type": "string", "anyOf": [
+        {"enum": ["male", "female", "unknown"],
+         "x-enumExtra": {"male": {"display": "Male"}, "female": {"display": "Female"},
+                         "unknown": {"display": "Unknown"}}}]},
+    "species": {"title": "Species", "type": "string", "anyOf": [
+        {"enum": ["bw", "wt"],
+         "x-enumExtra": {"bw": {"display": "Black Rhino"}, "wt": {"display": "White Rhino"}}}]},
+}}}
+
+
+def test_interactive_picker_and_value_fill(tmp_path):
+    """Numbered field picker wires an unmatched lookup field, then value
+    prompts resolve each source value by number."""
+    tags_file = tmp_path / "tags.json"
+    tags_file.write_text(json.dumps(_INTERACTIVE_TAGS))
+    schema_file = tmp_path / "schema.json"
+    schema_file.write_text(json.dumps(_INTERACTIVE_SCHEMA))
+    out_file = tmp_path / "mapping.json"
+
+    # Prompts in order: pick CMORE field for 'species' (1=Rhino Spesies);
+    # Animal Sex 'unknown' → 3 (Indeterminable); Rhino Spesies 'bw' → 2 (Black),
+    # 'wt' → 1 (White).
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "scaffold-mapping", "--event-type", "rhino_carcass", "--tag", "Rhino Carcass",
+        "--tags-file", str(tags_file), "--er-schema-file", str(schema_file),
+        "--out", str(out_file),
+    ], input="1\n3\n2\n1\n")
+    assert result.exit_code == 0, result.output
+
+    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    # male/female auto-resolve (display match) → only 'unknown' mapped.
+    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    # The picker wired 'species' → Rhino Spesies; both values filled by number.
+    species = by_field["Rhino Spesies"]["value_mappings"]
+    assert {"from_value": "bw", "to_value": "Black"} in species
+    assert {"from_value": "wt", "to_value": "White"} in species
+
+
 def test_scaffold_mapping_offline_end_to_end(tmp_path):
     """Run the CLI against the REAL ER schema dump + a minimal Wildlife tag."""
     tags_file = tmp_path / "tags.json"
