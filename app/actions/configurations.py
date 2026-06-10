@@ -45,6 +45,28 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
 # revert plan when the portal bug GUNDI-5371 is fixed.
 
 
+class CmoreValueMapping(pydantic.BaseModel):
+    """Translate one source (ER) value into the CMORE value to send.
+
+    Required for Lookup/FixedLookup fields whenever the source vocabulary
+    differs from CMORE's allowed options (e.g. ER 'b_3_months1_year' → CMORE
+    'Calf', ER 'Black Rhino' → CMORE 'Black'). Values that already match a
+    CMORE option (case/punctuation-insensitively, e.g. 'male' → 'Male') do
+    NOT need an entry.
+    """
+
+    from_value: str = FieldWithUIOptions(
+        ...,
+        title="Source value",
+        description="The value as it appears in the Gundi event_details (from ER).",
+    )
+    to_value: str = FieldWithUIOptions(
+        ...,
+        title="CMORE value",
+        description="The value to send to CMORE (must be a valid option for the field).",
+    )
+
+
 class CmoreFieldMapping(pydantic.BaseModel):
     """One Gundi event_details key → one CMORE field name (within a tag)."""
 
@@ -57,6 +79,17 @@ class CmoreFieldMapping(pydantic.BaseModel):
         ...,
         title="CMORE field name",
         description="Field name within the chosen CMORE tag.",
+    )
+    value_mappings: List[CmoreValueMapping] = FieldWithUIOptions(
+        default_factory=list,
+        title="Value Mappings",
+        description=(
+            "Optional source→CMORE value translations, mainly for Lookup "
+            "fields whose allowed options differ from the source values. "
+            "Unmapped values are matched against the field's options "
+            "case/punctuation-insensitively; anything that still doesn't "
+            "match a valid option is dropped (and logged)."
+        ),
     )
 
 
@@ -82,9 +115,11 @@ class CmoreTagMapping(pydantic.BaseModel):
         title="Field Mappings",
         description=(
             "Map Gundi event_details keys to CMORE field names within the "
-            "chosen tag. Values are stringified before sending. For "
-            "Lookup-typed CMORE fields, event_details should already contain "
-            "the CMORE-valid string (e.g., 'N to S' for a Direction field)."
+            "chosen tag. Values are coerced per the CMORE field's data type: "
+            "Lookup/FixedLookup values are resolved to a valid option (using "
+            "the optional value mappings, then a case/punctuation-insensitive "
+            "match); Number/Boolean values are validated; everything else is "
+            "sent as a string."
         ),
     )
 
@@ -223,8 +258,14 @@ class DeliverConfig(PushActionConfiguration):
                     },
                     "field_mappings": {
                         "items": {
-                            "event_details_key": {"ui:placeholder": "e.g. direction"},
-                            "cmore_field_name": {"ui:placeholder": "e.g. Direction"},
+                            "event_details_key": {"ui:placeholder": "e.g. animal_sex"},
+                            "cmore_field_name": {"ui:placeholder": "e.g. Animal Sex"},
+                            "value_mappings": {
+                                "items": {
+                                    "from_value": {"ui:placeholder": "e.g. b_3_months1_year"},
+                                    "to_value": {"ui:placeholder": "e.g. Calf"},
+                                },
+                            },
                         },
                     },
                 },

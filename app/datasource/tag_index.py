@@ -24,6 +24,7 @@ class FieldInfo:
     id: int
     name: str
     data_type: str
+    allow_multiple: bool = False
     lookups: List[dict] = field(default_factory=list)
 
 
@@ -62,6 +63,7 @@ def _build_index(raw_response: list) -> Dict[str, TagInfo]:
                     id=f["id"],
                     name=f_name,
                     data_type=f.get("dataType", "String"),
+                    allow_multiple=bool(f.get("allowMultipleValues", False)),
                     lookups=f.get("lookups", []) or [],
                 )
             tag_info = TagInfo(
