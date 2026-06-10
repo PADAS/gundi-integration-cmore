@@ -8,11 +8,51 @@ import os
 
 from click.testing import CliRunner
 
-from app.datasource.cli import cli, merge_event_type_mapping
+from types import SimpleNamespace
+
+from app.datasource.cli import (
+    _extract_auth_data,
+    _find_action_config,
+    cli,
+    merge_event_type_mapping,
+)
 
 _REAL_SCHEMA = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "docs", "rhino_carcass_schema_from_api.json"
 )
+
+
+def _fake_integration():
+    """An Integration-like object with auth + push action configs."""
+    return SimpleNamespace(
+        base_url="https://cmorewc1.chpc.ac.za",  # top-level base lacks the API path
+        configurations=[
+            SimpleNamespace(
+                id="auth-cfg",
+                action=SimpleNamespace(value="auth"),
+                data={"base_url": "https://cmorewc1.chpc.ac.za/za/WebAPI/api", "token": "secret"},
+            ),
+            SimpleNamespace(
+                id="push-cfg",
+                action=SimpleNamespace(value="push_events"),
+                data={"event_type_to_tag": []},
+            ),
+        ],
+    )
+
+
+def test_extract_auth_data_returns_full_api_base_and_token():
+    """The CMORE API base + token come from the auth config, not the
+    integration's top-level base_url (which omits the API path)."""
+    auth = _extract_auth_data(_fake_integration())
+    assert auth["base_url"] == "https://cmorewc1.chpc.ac.za/za/WebAPI/api"
+    assert auth["token"] == "secret"
+
+
+def test_find_action_config_locates_push_config():
+    config_id, data = _find_action_config(_fake_integration(), ("push_events", "deliver", "push"))
+    assert config_id == "push-cfg"
+    assert data == {"event_type_to_tag": []}
 
 
 def test_merge_event_type_mapping_replaces_same_event_type():

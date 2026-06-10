@@ -361,10 +361,15 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             conn = await gundi.get_connection_details(connection)
             provider = await gundi.get_integration_details(conn.provider.id)
             dest_integration = await gundi.get_integration_details(conn.destinations[0].id)
-            er_base = provider.base_url
-            er_token = _extract_auth_data(provider).get("token") or er_token
-            cmore_base = dest_integration.base_url or cmore_base
-            cmore_token = _extract_auth_data(dest_integration).get("token") or cmore_token
+            er_auth = _extract_auth_data(provider)
+            er_base = er_auth.get("base_url") or provider.base_url
+            er_token = er_auth.get("token") or er_token
+            # CMORE's API lives under a path (e.g. /za/WebAPI/api) that the
+            # integration's top-level base_url omits; the auth config carries the
+            # full API base the runner actually uses, so prefer it.
+            cmore_auth = _extract_auth_data(dest_integration)
+            cmore_base = cmore_auth.get("base_url") or dest_integration.base_url or cmore_base
+            cmore_token = cmore_auth.get("token") or cmore_token
             click.echo(f"Connection {connection}: provider={provider.name!r} destination={dest_integration.name!r}")
 
         # CMORE tag schema
