@@ -761,3 +761,96 @@ async def test_deliver_handles_empty_route_configuration(
 
     assert result["locations_posted"] == 1
     inner.post_locations.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Provider deep-link: render event.provider_metadata.source_event_url in
+# the CMORE event description so operators can click through to the source.
+# ---------------------------------------------------------------------------
+
+from app.actions.handlers import _build_event_description
+
+
+def test_build_event_description_appends_source_url_when_present():
+    """The provider runner stamped a deep-link URL → CMORE description carries
+    title + URL on a separate line."""
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        provider_metadata={
+            "source_event_url": "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6"
+        },
+    )
+    body = _build_event_description(e)
+    assert body.startswith("Coyote Carcass")
+    assert "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6" in body
+    assert "Source:" in body
+
+
+def test_build_event_description_falls_back_to_title_when_no_provider_metadata():
+    """No provider_metadata → just the title, same as before this feature."""
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+    )
+    assert _build_event_description(e) == "Coyote Carcass"
+
+
+def test_build_event_description_falls_back_to_event_type_when_titleless():
+    """Backward-compat: no title and no URL → fall back to event_type slug
+    (which the ER runner populates with the EventType display name when
+    possible, via the PR #16 title fallback)."""
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        event_type="coyote_carcass",
+    )
+    assert _build_event_description(e) == "coyote_carcass"
+
+
+def test_build_event_description_handles_provider_metadata_without_source_url():
+    """provider_metadata dict present but missing the expected key → no link."""
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        provider_metadata={"some_other_key": "value"},
+    )
+    assert _build_event_description(e) == "Coyote Carcass"
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_includes_deep_link_in_cmore_post(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """End-to-end: Event with provider_metadata reaches _push_event and the
+    CMORE post carries the deep-link in the description."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Coyote Carcass",
+        location=Location(lat=0.0, lon=0.0),
+        provider_metadata={
+            "source_event_url": "https://gundi-er.pamdas.org/events/abc"
+        },
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    sent = inner.post_event.call_args.args[0]
+    assert "Coyote Carcass" in sent.description
+    assert "https://gundi-er.pamdas.org/events/abc" in sent.description
