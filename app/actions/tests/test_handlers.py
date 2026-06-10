@@ -764,32 +764,27 @@ async def test_deliver_handles_empty_route_configuration(
 
 
 # ---------------------------------------------------------------------------
-# Provider deep-link: render event.provider_metadata.source_event_url in
-# the CMORE event description so operators can click through to the source.
+# Provider deep-link: the source_event_url is surfaced ONLY as a comment on
+# the CMORE event (see _push_event), never in the event title/description.
 # ---------------------------------------------------------------------------
 
 from app.actions.handlers import _build_event_description
 
 
-def test_build_event_description_joins_title_and_url_with_pipe():
-    """Deep-link is joined to the title with ``" | "`` on a single line.
-    CMORE's list and edit views truncate / hide multi-line descriptions, so a
-    single-line format maximises the chance the URL stays visible."""
+def test_build_event_description_excludes_url_even_with_provider_metadata():
+    """The deep-link must NOT appear in the description — it is posted as a
+    comment instead. The description is just the event title."""
+    url = "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6"
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
         title="Coyote Carcass",
-        provider_metadata={
-            "source_event_url": "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6"
-        },
+        provider_metadata={"source_event_url": url},
     )
     body = _build_event_description(e)
-    assert body == (
-        "Coyote Carcass | "
-        "https://gundi-er.pamdas.org/events/907a54b9-808b-45a6-919c-b6dd204c32c6"
-    )
-    assert "\n" not in body
+    assert body == "Coyote Carcass"
+    assert url not in body
 
 
 def test_build_event_description_falls_back_to_title_when_no_provider_metadata():
@@ -829,11 +824,12 @@ def test_build_event_description_handles_provider_metadata_without_source_url():
 
 
 @pytest.mark.asyncio
-async def test_deliver_event_includes_deep_link_in_cmore_post(
+async def test_deliver_event_keeps_deep_link_out_of_cmore_post_description(
     mocker, integration, deliver_config, provider_info, metadata
 ):
     """End-to-end: Event with provider_metadata reaches _push_event and the
-    CMORE post carries the deep-link in the description."""
+    CMORE post description carries only the title — the deep-link is kept out
+    of the description (it is posted as a comment instead)."""
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker)
@@ -855,17 +851,17 @@ async def test_deliver_event_includes_deep_link_in_cmore_post(
 
     inner.post_event.assert_awaited_once()
     sent = inner.post_event.call_args.args[0]
-    assert "Coyote Carcass" in sent.description
-    assert "https://gundi-er.pamdas.org/events/abc" in sent.description
+    assert sent.description == "Coyote Carcass"
+    assert "https://gundi-er.pamdas.org/events/abc" not in sent.description
 
 
 @pytest.mark.asyncio
 async def test_deliver_event_also_posts_deep_link_as_comment(
     mocker, integration, deliver_config, provider_info, metadata
 ):
-    """Belt-and-suspenders for visibility: the deep-link is also posted as a
-    comment on the new CMORE event so it surfaces in detail views even if list
-    views truncate the description."""
+    """The deep-link is posted as a comment on the new CMORE event — this is
+    the sole place the source URL is rendered (it is kept out of the
+    description), so it surfaces in CMORE's event detail view."""
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
@@ -922,7 +918,7 @@ async def test_deliver_event_skips_deep_link_comment_when_no_message_id(
     mocker, integration, deliver_config, provider_info, metadata
 ):
     """If CMORE returns a response without messageId, skip the comment (can't
-    target it). Description still carries the pipe-delimited URL though."""
+    target it). The URL is not rendered anywhere in that case."""
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker, post_event_return={"status": "ok-but-weird"})
