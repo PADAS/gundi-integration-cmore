@@ -350,21 +350,14 @@ def _get_source_event_url(event: schemas.v2.Event) -> Optional[str]:
 def _build_event_description(event: schemas.v2.Event) -> str:
     """Render the CMORE event description.
 
-    Format: ``<title> | <source_event_url>`` when the provider runner
-    attached a deep-link. Single line with a pipe separator because CMORE's
-    list and edit views truncate or hide multi-line descriptions — keeping
-    the URL on the same line as the title maximises the chance it stays
-    visible. The deep-link is ALSO posted as a comment immediately after
-    ``post_event`` (see ``_push_event``) so it appears in the detail view
-    even if the description gets truncated.
+    Just the event title. The source deep-link is NOT included here — it is
+    posted as a comment immediately after ``post_event`` (see ``_push_event``),
+    which keeps the title clean while still surfacing the cross-reference in
+    CMORE's detail view.
 
-    Title fallback chain unchanged: title → event_type slug → "Gundi Event".
+    Title fallback chain: title → event_type slug → "Gundi Event".
     """
-    title = event.title or event.event_type or "Gundi Event"
-    source_event_url = _get_source_event_url(event)
-    if source_event_url:
-        return f"{title} | {source_event_url}"
-    return title
+    return event.title or event.event_type or "Gundi Event"
 
 
 async def _push_event(
@@ -427,8 +420,8 @@ async def _push_event(
             ownerGroupId=auth.owner_group_id,
             tags=tags,
         )
-        # Diagnostic: log the outbound description verbatim so missing/truncated
-        # URLs in CMORE's UI can be cross-checked against what we actually sent.
+        # Diagnostic: log the outbound description verbatim so it can be
+        # cross-checked against what shows up in CMORE's UI.
         logger.info(
             "Posting CMORE event: description=%r",
             cmore_event.description,
@@ -442,10 +435,10 @@ async def _push_event(
         )
         cmore_message_id = _extract_message_id(response)
 
-        # Belt-and-suspenders: also post the deep-link URL as a comment so it
-        # surfaces in CMORE's event detail view even if list/edit views hide
-        # or truncate the description's pipe-separated link. Only when both
-        # the URL was attached upstream AND we got a messageId back.
+        # Post the source deep-link URL as a comment so it surfaces in CMORE's
+        # event detail view. This is the sole place the link is rendered — it
+        # is intentionally kept out of the event title/description. Only when
+        # both the URL was attached upstream AND we got a messageId back.
         source_event_url = _get_source_event_url(event)
         if source_event_url and cmore_message_id is not None:
             comment_body = f"Source: {source_event_url}"
