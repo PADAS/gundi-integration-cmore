@@ -288,3 +288,12 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
     age_maps = by_field["Animal Age"]["value_mappings"]
     assert {"from_value": "b_3_months1_year", "to_value": ""} in age_maps
     assert len(age_maps) == 6
+
+
+def test_ensure_scheme_prepends_https_when_missing():
+    from app.datasource.cli import _ensure_scheme
+    assert _ensure_scheme("gundi-er.pamdas.org") == "https://gundi-er.pamdas.org"
+    assert _ensure_scheme("https://x.org") == "https://x.org"
+    assert _ensure_scheme("http://x.org") == "http://x.org"
+    assert _ensure_scheme(None) is None
+    assert _ensure_scheme("") == ""
