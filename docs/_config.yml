@@ -1,0 +1,15 @@
+title: Gundi CMORE Action Runner
+description: What the CMORE destination action runner does and how to configure it.
+theme: jekyll-theme-cayman
+
+# This site is served from /docs on the default branch. The folder also holds
+# third-party CMORE PDFs and internal planning notes that should NOT be
+# published — exclude them so only the curated pages below are rendered.
+exclude:
+  - "*.pdf"
+  - "Cmore API Reference.html"
+  - "executive-brief-cmore-integration.md"
+  - "implementation-plans.md"
+  - "portal-rendering-workaround.md"
+  - "Untitled.md"
+  - "*.json"
