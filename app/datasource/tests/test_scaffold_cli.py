@@ -173,6 +173,45 @@ async def test_choose_fallback_number_default_skip_quit(mocker):
         await _choose("m", ["A"], skip_label="skip")
 
 
+@pytest.mark.asyncio
+async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
+    """When an existing mapping is supplied, its value is pre-selected and a
+    bare Enter keeps it (rather than dropping the value)."""
+    from app.datasource.cli import _interactive_fill
+    from app.datasource.er_schema import ERChoice, ERField
+    from app.datasource.mapping_scaffold import FieldScaffold, ScaffoldResult
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    mocker.patch("sys.stdin.isatty", return_value=False)        # numbered fallback
+    mocker.patch.object(cli_module.click, "prompt", return_value="")  # Enter = keep default
+
+    tag_info = TagInfo(
+        id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
+        fields={"Animal Age": FieldInfo(
+            id=1260, name="Animal Age", data_type="Lookup",
+            lookups=[{"id": 1, "value": "Adult"}, {"id": 2, "value": "Sub-Adult"}, {"id": 3, "value": "Calf"}],
+        )},
+    )
+    er_fields = [ERField("age_of_animal", "Age Of Animal",
+                         [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
+    result = ScaffoldResult(
+        event_type="rhino_carcass", tag_name="Rhino Carcass",
+        fields=[FieldScaffold(
+            event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
+        )],
+    )
+    existing_entry = {"field_mappings": [{
+        "event_details_key": "age_of_animal", "cmore_field_name": "Animal Age",
+        "value_mappings": [{"from_value": "b_3_months1_year", "to_value": "Calf"}],
+    }]}
+
+    await _interactive_fill(result, tag_info, er_fields, existing_entry)
+
+    # Enter kept the existing 'Calf' mapping rather than dropping it.
+    assert result.fields[0].value_mappings == [{"from_value": "b_3_months1_year", "to_value": "Calf"}]
+
+
 def test_interactive_next_and_back_navigation(tmp_path):
     """'n' advances to the next field; 'b' returns to the previous one to edit."""
     tags_file = tmp_path / "tags.json"

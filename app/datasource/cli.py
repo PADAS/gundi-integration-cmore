@@ -434,9 +434,10 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
                     scaffold.value_mappings.append({"from_value": choice.value, "to_value": option})
         result.fields.append(scaffold)
 
-    # 2) Fill value mappings — navigate fields with next/back. Each source
-    #    value is shown with its ER display label and its current/existing
-    #    value pre-selected, so Enter keeps it.
+    # 2) Fill value mappings — navigate fields with next/back. Every value
+    #    mapping is prompted (not just blanks) so the operator can review and
+    #    revise; each is shown with its ER display label and its current/
+    #    existing value pre-selected, so Enter keeps it.
     nav_fields = [fs for fs in result.fields if fs.value_mappings]
     fi = 0
     while 0 <= fi < len(nav_fields):
