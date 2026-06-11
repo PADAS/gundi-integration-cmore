@@ -157,6 +157,12 @@ async def test_choose_fallback_number_default_skip_quit(mocker):
     # Enter with no default → skip (None).
     assert await _choose("m", ["A", "B"], skip_label="skip") is None
 
+    # 's' skips the rest of the current field when skip_all_label is offered.
+    mocker.patch.object(cli_module.click, "prompt", return_value="s")
+    assert await _choose("m", ["A"], skip_label="skip", skip_all_label="skip field") is cli_module._SKIP_ALL
+    # ...but 's' is not special unless skip_all_label is set (treated as a value).
+    assert await _choose("m", ["A"], skip_label="skip", allow_free_text=True) == "s"
+
     # 'q' quits the wizard.
     mocker.patch.object(cli_module.click, "prompt", return_value="q")
     with pytest.raises(cli_module.click.Abort):

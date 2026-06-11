@@ -285,11 +285,13 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
 # Sentinels for menu outcomes. Distinct objects because questionary's
 # Choice(value=None) defaults the value to the *title* string — so None can't
 # safely mark "skip".
-_QUIT = object()
-_SKIP = object()
+_QUIT = object()       # abort the whole wizard
+_SKIP = object()       # skip just this item (→ None)
+_SKIP_ALL = object()   # skip the rest of the current property/field
 
 
-async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False, default=None):
+async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False,
+                  default=None, skip_all_label=None):
     """Single-choice picker. Uses an arrow-key menu (questionary) on a real
     terminal; falls back to a numbered prompt when there's no TTY (piped
     input, CI, tests) or questionary isn't installed.
@@ -322,6 +324,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
             choices.append(questionary.Choice(title=label, value=value))
         if skip_label is not None:
             choices.append(questionary.Choice(title=skip_label, value=_SKIP))
+        if skip_all_label is not None:
+            choices.append(questionary.Choice(title=skip_all_label, value=_SKIP_ALL))
         choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
         kwargs = {"choices": choices, "qmark": "›"}
         if has_default:
@@ -346,6 +350,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     parts = ["number"]
     if allow_free_text:
         parts.append("value")
+    if skip_all_label is not None:
+        parts.append("s to skip field")
     parts.append("q to quit")
     if has_default:
         tail = f" (Enter to keep current: {default})"
@@ -356,6 +362,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     sel = click.prompt(f"  {' / '.join(parts)}{tail}", default="", show_default=False).strip()
     if sel.lower() == "q":
         raise click.Abort()
+    if skip_all_label is not None and sel.lower() == "s":
+        return _SKIP_ALL
     if not sel:
         return default if has_default else None
     if sel.isdigit() and 1 <= int(sel) <= len(options):
@@ -435,7 +443,10 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
                 f"\n{field_scaffold.cmore_field_name}  ←  {shown}",
                 options, skip_label="— drop this value —", allow_free_text=True,
                 default=existing_values.get(vm["from_value"]),
+                skip_all_label="— skip this field (leave remaining values unmapped) —",
             )
+            if chosen is _SKIP_ALL:
+                break  # stop prompting for this property's remaining values
             if chosen:
                 vm["to_value"] = chosen
         field_scaffold.value_mappings = [vm for vm in field_scaffold.value_mappings if vm["to_value"]]
