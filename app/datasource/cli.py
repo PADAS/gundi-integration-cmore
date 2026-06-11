@@ -282,41 +282,200 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
-def _interactive_fill(result, tag_info):
-    """Walk the scaffold with the operator: confirm/override unmatched fields
-    and fill blank lookup value mappings. Mutates ``result`` in place."""
-    from .mapping_scaffold import FieldScaffold
+# Sentinels for menu outcomes. Distinct objects because questionary's
+# Choice(value=None) defaults the value to the *title* string — so None can't
+# safely mark "skip".
+_QUIT = object()       # abort the whole wizard
+_SKIP = object()       # skip just this item (→ None)
+_SKIP_ALL = object()   # accept current values for the rest of this field, advance
+_BACK = object()       # go back to the previous field
 
+
+async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False,
+                  default=None, skip_all_label=None, back_label=None):
+    """Single-choice picker. Uses an arrow-key menu (questionary) on a real
+    terminal; falls back to a numbered prompt when there's no TTY (piped
+    input, CI, tests) or questionary isn't installed.
+
+    ``options`` are the returned values; ``titles`` are optional display
+    strings parallel to ``options``. ``default`` (if it's one of ``options``)
+    is pre-selected — the current/existing mapping — so Enter keeps it.
+    Returns the chosen value, ``None`` if skipped. When ``allow_free_text``
+    (numbered fallback only), a typed value that isn't a list number is
+    returned verbatim.
+
+    Quitting (the "quit" entry, ``q`` in the fallback, or Ctrl-C) raises
+    ``click.Abort`` to exit the wizard cleanly without writing anything.
+    """
+    import sys
+
+    titles = titles or [str(o) for o in options]
+    has_default = default is not None and default in options
+    try:
+        import questionary
+
+        use_arrows = sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        use_arrows = False
+
+    click.echo()  # blank line to separate this prompt from prior output
+
+    if use_arrows:
+        choices = []
+        for title, value in zip(titles, options):
+            label = title + ("   (current)" if has_default and value == default else "")
+            choices.append(questionary.Choice(title=label, value=value))
+        if skip_label is not None:
+            choices.append(questionary.Choice(title=skip_label, value=_SKIP))
+        if skip_all_label is not None:
+            choices.append(questionary.Choice(title=skip_all_label, value=_SKIP_ALL))
+        if back_label is not None:
+            choices.append(questionary.Choice(title=back_label, value=_BACK))
+        choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
+        kwargs = {"choices": choices, "qmark": "›"}
+        if has_default:
+            kwargs["default"] = default
+        # unsafe_ask_async runs in the current event loop (we're inside
+        # asyncio.run) AND re-raises KeyboardInterrupt so Ctrl-C quits rather
+        # than silently returning None.
+        try:
+            answer = await questionary.select(message.strip(), **kwargs).unsafe_ask_async()
+        except KeyboardInterrupt:
+            raise click.Abort()
+        if answer is _QUIT:
+            raise click.Abort()
+        if answer is _SKIP:
+            return None
+        return answer  # may be _SKIP_ALL or _BACK sentinel, or a chosen value
+
+    click.echo(message.strip())
+    for i, title in enumerate(titles, start=1):
+        marker = "   (current)" if has_default and options[i - 1] == default else ""
+        click.echo(f"  {i}. {title}{marker}")
+    parts = ["number"]
+    if allow_free_text:
+        parts.append("value")
+    if skip_all_label is not None:
+        parts.append("n for next field")
+    if back_label is not None:
+        parts.append("b to go back")
+    parts.append("q to quit")
+    if has_default:
+        tail = f" (Enter to keep current: {default})"
+    elif skip_label is not None:
+        tail = " (Enter to skip)"
+    else:
+        tail = ""
+    sel = click.prompt(f"  {' / '.join(parts)}{tail}", default="", show_default=False).strip()
+    if sel.lower() == "q":
+        raise click.Abort()
+    if back_label is not None and sel.lower() == "b":
+        return _BACK
+    if skip_all_label is not None and sel.lower() == "n":
+        return _SKIP_ALL
+    if not sel:
+        return default if has_default else None
+    if sel.isdigit() and 1 <= int(sel) <= len(options):
+        return options[int(sel) - 1]
+    if allow_free_text:
+        return sel
+    return None
+
+
+async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
+    """Walk the scaffold with the operator: wire unmatched fields, then fill
+    blank lookup value mappings. Each pick is an arrow-key menu on a TTY (see
+    ``_choose``). If ``existing_entry`` (the current mapping for this event
+    type) is given, the previously-chosen field/value is pre-selected as the
+    default. Mutates ``result`` in place."""
+    from .mapping_scaffold import FieldScaffold, suggest_lookup_value, _normalize
+
+    er_by_key = {f.key: f for f in er_fields}
+    LOOKUP_TYPES = ("Lookup", "FixedLookup")
+
+    # Existing mapping → defaults: er_key -> cmore_field, er_key -> {from: to}.
+    existing_field_by_key = {}
+    existing_value_by_key = {}
+    for fm in (existing_entry or {}).get("field_mappings", []):
+        existing_field_by_key[fm.get("event_details_key")] = fm.get("cmore_field_name")
+        existing_value_by_key[fm.get("event_details_key")] = {
+            vm["from_value"]: vm["to_value"]
+            for vm in fm.get("value_mappings", []) if vm.get("to_value")
+        }
+
+    def _lookup_options(field_info):
+        return [lk.get("value") for lk in (getattr(field_info, "lookups", None) or [])]
+
+    # 1) Wire unmatched ER fields by picking from the uncovered CMORE fields.
+    uncovered = list(result.uncovered_cmore_fields)
     for er_key in list(result.unmatched_er_fields):
-        click.echo(f"\nUnmatched ER field: {er_key}")
-        choice = click.prompt(
-            "  Map to CMORE field (name, or blank to skip)", default="", show_default=False
-        ).strip()
-        if not choice:
+        if not uncovered:
+            break
+        titles = [f"{n}  ({tag_info.field_by_name(n).data_type})" for n in uncovered]
+        name = await _choose(
+            f"\nER field '{er_key}' has no CMORE match — pick a CMORE field:",
+            uncovered, titles=titles, skip_label="— skip this field —",
+            default=existing_field_by_key.get(er_key),
+        )
+        if name is None:
             continue
-        if tag_info.field_by_name(choice) is None:
-            click.echo(f"  '{choice}' is not a field on '{tag_info.name}'; skipping.")
-            continue
+        uncovered.remove(name)
         result.unmatched_er_fields.remove(er_key)
-        result.fields.append(FieldScaffold(event_details_key=er_key, cmore_field_name=choice))
+        scaffold = FieldScaffold(event_details_key=er_key, cmore_field_name=name)
+        # Seed value mappings for a newly-wired lookup field from its ER choices.
+        field_info = tag_info.field_by_name(name)
+        er_field = er_by_key.get(er_key)
+        if field_info.data_type in LOOKUP_TYPES and er_field and er_field.choices:
+            for choice in er_field.choices:
+                option = suggest_lookup_value(choice, field_info)
+                if option is None:
+                    scaffold.value_mappings.append({"from_value": choice.value, "to_value": ""})
+                elif _normalize(choice.value) != _normalize(option):
+                    scaffold.value_mappings.append({"from_value": choice.value, "to_value": option})
+        result.fields.append(scaffold)
 
-    for field_scaffold in result.fields:
-        field_info = tag_info.field_by_name(field_scaffold.cmore_field_name)
-        options = [lk.get("value") for lk in (getattr(field_info, "lookups", None) or [])]
-        for vm in field_scaffold.value_mappings:
-            if vm["to_value"]:
-                continue
-            click.echo(f"\n{field_scaffold.cmore_field_name}: source value '{vm['from_value']}'")
-            for i, opt in enumerate(options, start=1):
-                click.echo(f"  {i}. {opt}")
-            picked = click.prompt(
-                "  CMORE value (number, exact value, or blank to drop)", default="", show_default=False
-            ).strip()
-            if picked.isdigit() and 1 <= int(picked) <= len(options):
-                vm["to_value"] = options[int(picked) - 1]
-            elif picked:
-                vm["to_value"] = picked
-        field_scaffold.value_mappings = [vm for vm in field_scaffold.value_mappings if vm["to_value"]]
+    # 2) Fill value mappings — navigate fields with next/back. Every value
+    #    mapping is prompted (not just blanks) so the operator can review and
+    #    revise; each is shown with its ER display label and its current/
+    #    existing value pre-selected, so Enter keeps it.
+    nav_fields = [fs for fs in result.fields if fs.value_mappings]
+    fi = 0
+    while 0 <= fi < len(nav_fields):
+        fs = nav_fields[fi]
+        field_info = tag_info.field_by_name(fs.cmore_field_name)
+        options = _lookup_options(field_info)
+        er_field = er_by_key.get(fs.event_details_key)
+        displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
+        existing_values = existing_value_by_key.get(fs.event_details_key, {})
+
+        go_back = False
+        for vi, vm in enumerate(fs.value_mappings):
+            current = vm["to_value"] or existing_values.get(vm["from_value"])
+            label = displays.get(vm["from_value"], "")
+            shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
+            chosen = await _choose(
+                f"\n[field {fi + 1}/{len(nav_fields)}] {fs.cmore_field_name}  ←  {shown}",
+                options, skip_label="— drop this value —", allow_free_text=True,
+                default=current,
+                skip_all_label="→ next field (keep current values for the rest)",
+                back_label=("← back to previous field" if fi > 0 else None),
+            )
+            if chosen is _BACK:
+                go_back = True
+                break
+            if chosen is _SKIP_ALL:
+                # Accept current/existing for this value and the remaining ones.
+                for rest in fs.value_mappings[vi:]:
+                    keep = rest["to_value"] or existing_values.get(rest["from_value"])
+                    if keep:
+                        rest["to_value"] = keep
+                break
+            # A picked value, or None when dropped / Enter with no current.
+            vm["to_value"] = chosen or ""
+        fi = fi - 1 if go_back else fi + 1
+
+    for fs in result.fields:
+        fs.value_mappings = [vm for vm in fs.value_mappings if vm["to_value"]]
 
 
 @cli.command("scaffold-mapping")
@@ -352,6 +511,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         cmore_base = ctx.obj["base_url"]
         cmore_token = ctx.obj["token"]
         er_base = er_token = dest_integration = None
+        deliver_config_id, deliver_data, existing_entry = None, {}, None
 
         if connection:
             from gundi_client_v2 import GundiClient
@@ -361,11 +521,34 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             conn = await gundi.get_connection_details(connection)
             provider = await gundi.get_integration_details(conn.provider.id)
             dest_integration = await gundi.get_integration_details(conn.destinations[0].id)
-            er_base = provider.base_url
-            er_token = _extract_auth_data(provider).get("token") or er_token
-            cmore_base = dest_integration.base_url or cmore_base
-            cmore_token = _extract_auth_data(dest_integration).get("token") or cmore_token
+            er_auth = _extract_auth_data(provider)
+            er_base = er_auth.get("base_url") or provider.base_url
+            er_token = er_auth.get("token") or er_token
+            # CMORE's API lives under a path (e.g. /za/WebAPI/api) that the
+            # integration's top-level base_url omits; the auth config carries the
+            # full API base the runner actually uses, so prefer it.
+            cmore_auth = _extract_auth_data(dest_integration)
+            cmore_base = cmore_auth.get("base_url") or dest_integration.base_url or cmore_base
+            cmore_token = cmore_auth.get("token") or cmore_token
+            # Existing deliver config → defaults for any mapping already set up.
+            deliver_config_id, deliver_data = _find_action_config(
+                dest_integration, ("push_events", "deliver", "push")
+            )
+            existing_entry = next(
+                (m for m in (deliver_data.get("event_type_to_tag") or [])
+                 if m.get("event_type") == event_type),
+                None,
+            )
             click.echo(f"Connection {connection}: provider={provider.name!r} destination={dest_integration.name!r}")
+            if existing_entry:
+                click.echo(f"Found an existing mapping for '{event_type}' → defaults pre-selected.")
+
+        if not non_interactive:
+            click.echo(
+                f"\nBuilding an ER → CMORE mapping for event_type '{event_type}'.\n"
+                "At each prompt: ↑/↓ + Enter to choose (or type the number), "
+                "pick “quit” / press Ctrl-C to exit.\n"
+            )
 
         # CMORE tag schema
         if tags_file:
@@ -379,9 +562,15 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         index = _build_index(raw_tags)
         resolved_tag = tag_name
         if not resolved_tag:
-            click.echo("Available CMORE tags: " + ", ".join(sorted(index)))
-            resolved_tag = click.prompt("CMORE tag name")
-        tag_info = index.get(resolved_tag)
+            # Pick the CMORE tag from a menu (arrow-key on a TTY) rather than
+            # making the operator type the exact name.
+            titles = [f"{name}  ({index[name].domain})" for name in sorted(index)]
+            resolved_tag = await _choose(
+                f"Select the CMORE tag to map '{event_type}' events to:",
+                sorted(index), titles=titles, skip_label=None,
+                default=(existing_entry or {}).get("tag_name"),
+            )
+        tag_info = index.get(resolved_tag) if resolved_tag else None
         if tag_info is None:
             raise click.UsageError(f"CMORE tag {resolved_tag!r} not found in the tag schema.")
 
@@ -419,7 +608,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             click.echo("  Uncovered CMORE fields: " + ", ".join(result.uncovered_cmore_fields))
 
         if not non_interactive:
-            _interactive_fill(result, tag_info)
+            await _interactive_fill(result, tag_info, er_fields, existing_entry)
 
         entry = result.to_config_entry()
         rendered = json.dumps(entry, indent=2)
@@ -433,12 +622,11 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if write:
             if gundi is None or dest_integration is None:
                 raise click.UsageError("--write requires --connection (to locate the CMORE integration).")
-            config_id, deliver_data = _find_action_config(dest_integration, ("push_events", "deliver", "push"))
-            if config_id is None:
+            if deliver_config_id is None:
                 raise click.UsageError("Could not find a deliver/push action configuration on the CMORE integration.")
             new_data = merge_event_type_mapping(deliver_data, entry)
-            await gundi.update_integration_configuration(dest_integration.id, config_id, new_data)
-            click.echo(f"\nWrote mapping back to CMORE integration {dest_integration.id} (config {config_id}).")
+            await gundi.update_integration_configuration(dest_integration.id, deliver_config_id, new_data)
+            click.echo(f"\nWrote mapping back to CMORE integration {dest_integration.id} (config {deliver_config_id}).")
 
         if gundi is not None:
             await gundi.close()
