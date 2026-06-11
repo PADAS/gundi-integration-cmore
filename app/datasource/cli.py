@@ -282,7 +282,7 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
-def _choose(message, options, *, skip_label, titles=None, allow_free_text=False):
+async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False):
     """Single-choice picker. Uses an arrow-key menu (questionary) on a real
     terminal; falls back to a numbered prompt when there's no TTY (piped
     input, CI, tests) or questionary isn't installed.
@@ -305,7 +305,9 @@ def _choose(message, options, *, skip_label, titles=None, allow_free_text=False)
     if use_arrows:
         choices = [questionary.Choice(title=t, value=v) for t, v in zip(titles, options)]
         choices.append(questionary.Choice(title=skip_label, value=None))
-        return questionary.select(message.strip(), choices=choices, qmark="›").ask()
+        # ask_async runs in the current event loop (we're inside asyncio.run);
+        # the sync .ask() would try to start its own loop and blow up.
+        return await questionary.select(message.strip(), choices=choices, qmark="›").ask_async()
 
     click.echo(message)
     for i, title in enumerate(titles, start=1):
@@ -319,7 +321,7 @@ def _choose(message, options, *, skip_label, titles=None, allow_free_text=False)
     return None
 
 
-def _interactive_fill(result, tag_info, er_fields):
+async def _interactive_fill(result, tag_info, er_fields):
     """Walk the scaffold with the operator: wire unmatched fields, then fill
     blank lookup value mappings. Each pick is an arrow-key menu on a TTY (see
     ``_choose``). Mutates ``result`` in place."""
@@ -337,7 +339,7 @@ def _interactive_fill(result, tag_info, er_fields):
         if not uncovered:
             break
         titles = [f"{n}  ({tag_info.field_by_name(n).data_type})" for n in uncovered]
-        name = _choose(
+        name = await _choose(
             f"\nER field '{er_key}' has no CMORE match — pick a CMORE field:",
             uncovered, titles=titles, skip_label="— skip this field —",
         )
@@ -371,7 +373,7 @@ def _interactive_fill(result, tag_info, er_fields):
         for vm in blanks:
             label = displays.get(vm["from_value"], "")
             shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
-            chosen = _choose(
+            chosen = await _choose(
                 f"\n{field_scaffold.cmore_field_name}  ←  {shown}",
                 options, skip_label="— drop this value —", allow_free_text=True,
             )
@@ -485,7 +487,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             click.echo("  Uncovered CMORE fields: " + ", ".join(result.uncovered_cmore_fields))
 
         if not non_interactive:
-            _interactive_fill(result, tag_info, er_fields)
+            await _interactive_fill(result, tag_info, er_fields)
 
         entry = result.to_config_entry()
         rendered = json.dumps(entry, indent=2)
