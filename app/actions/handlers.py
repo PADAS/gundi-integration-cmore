@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 TRACK_SOURCE = "Gundi"
 
-# TTL for the per-event external_source_id → cmore_message_id mapping. Long
+# TTL for the per-event gundi_id → cmore_message_id mapping. Long
 # enough that any realistic edit window (notes, status flips) lands while we
 # can still find the target CMORE event; short enough that the keyspace
 # eventually prunes itself for events that nobody touches again.
@@ -556,16 +556,18 @@ async def _push_event(
                 cmore_message_id,
             )
 
-    # Persist the source→messageId mapping so a subsequent EventUpdate for the
-    # same source event can be hung off this CMORE event as a comment
-    # (GUNDI-5386). Keyed by the provider's external_source_id (e.g. the ER
-    # event UUID) — Gundi propagates that same string on both Event and
-    # EventUpdate payloads.
-    if event.external_source_id and cmore_message_id is not None:
+    # Persist the event→messageId mapping so a subsequent EventUpdate for the
+    # same event can be hung off this CMORE event as a comment (GUNDI-5386).
+    # Keyed by gundi_id (the event's object_id) — unique per event and present
+    # on both Event and EventUpdate payloads. NOT external_source_id, which
+    # identifies the source (device/provider) and is shared across every event
+    # from that source, so keying on it collides (updates would route to the
+    # most-recently-seen event from the same source).
+    if event.gundi_id and cmore_message_id is not None:
         await state_manager.set_state(
             integration_id=str(integration.id),
             action_id="deliver",
-            source_id=event.external_source_id,
+            source_id=str(event.gundi_id),
             state={"cmore_message_id": cmore_message_id},
             ttl_seconds=CMORE_EVENT_MAPPING_TTL_SECONDS,
         )
@@ -591,7 +593,7 @@ def _extract_message_id(post_event_response):
     except (TypeError, ValueError):
         logger.error(
             "CMORE post_event response had non-integer messageId=%r; "
-            "skipping external_source_id → cmore_message_id mapping write.",
+            "skipping gundi_id → cmore_message_id mapping write.",
             raw,
         )
         return None
@@ -663,17 +665,17 @@ async def _push_event_update_as_comment(
     of a race or a backfill ordering issue) is logged as WARNING and dropped
     rather than crashing the handler.
     """
-    external_source_id = event_update.external_source_id
-    if not external_source_id:
+    gundi_id = event_update.gundi_id
+    if not gundi_id:
         logger.warning(
-            "EventUpdate without external_source_id; cannot route to a CMORE event. Dropping."
+            "EventUpdate without gundi_id; cannot route to a CMORE event. Dropping."
         )
-        return {"dropped": True, "reason": "missing_external_source_id"}
+        return {"dropped": True, "reason": "missing_gundi_id"}
 
     state = await state_manager.get_state(
         integration_id=str(integration.id),
         action_id="deliver",
-        source_id=external_source_id,
+        source_id=str(gundi_id),
     )
     cmore_message_id = state.get("cmore_message_id") if state else None
     if not cmore_message_id:
@@ -682,7 +684,7 @@ async def _push_event_update_as_comment(
             action_id="deliver",
             title="CMORE event not yet seen — skipping update",
             level=LogLevel.WARNING,
-            data={"external_source_id": external_source_id},
+            data={"gundi_id": str(gundi_id)},
         )
         return {"dropped": True, "reason": "cmore_message_id_not_found"}
 

@@ -555,6 +555,7 @@ async def test_deliver_event_update_logs_warning_when_no_mapping_exists(
     activity_log = _patch_activity_logger(mocker)
 
     eu = EventUpdate(
+        gundi_id="gid-never-seen",
         source_id=uuid.uuid4(),
         external_source_id="er-uuid-never-seen",
         changes={"status": "resolved"},
@@ -589,6 +590,7 @@ async def test_deliver_event_update_posts_status_change_as_comment(
     _patch_activity_logger(mocker)
 
     eu = EventUpdate(
+        gundi_id="gid-seen",
         source_id=uuid.uuid4(),
         external_source_id="er-uuid-seen",
         changes={"status": "active"},
@@ -618,6 +620,7 @@ async def test_deliver_event_update_posts_note_as_comment_with_author(
     _patch_activity_logger(mocker)
 
     eu = EventUpdate(
+        gundi_id="gid-seen",
         source_id=uuid.uuid4(),
         external_source_id="er-uuid-seen",
         changes={
@@ -675,6 +678,7 @@ async def test_deliver_event_records_mapping_for_followup_updates(
     _patch_activity_logger(mocker)
 
     e = Event(
+        gundi_id="gid-new",
         source_id=uuid.uuid4(),
         external_source_id="er-uuid-new",
         recorded_at=datetime.now(tz=timezone.utc),
@@ -688,11 +692,49 @@ async def test_deliver_event_records_mapping_for_followup_updates(
     inner.post_event.assert_awaited_once()
     state.set_state.assert_awaited_once()
     call_kwargs = state.set_state.call_args.kwargs
-    assert call_kwargs["source_id"] == "er-uuid-new"
+    # Keyed by gundi_id (unique per event), not external_source_id (the source).
+    assert call_kwargs["source_id"] == "gid-new"
     assert call_kwargs["state"] == {"cmore_message_id": 99999}
     # Mapping is bounded by a TTL so the Redis keyspace doesn't grow forever.
     from app.actions.handlers import CMORE_EVENT_MAPPING_TTL_SECONDS
     assert call_kwargs["ttl_seconds"] == CMORE_EVENT_MAPPING_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_two_events_same_source_get_distinct_mappings(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """Two events sharing an external_source_id but with distinct gundi_ids must
+    map to distinct keys — otherwise an EventUpdate routes to the wrong (latest)
+    event. Regression for keying the mapping by source instead of by gundi_id."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    inner.post_event = AsyncMock(side_effect=[{"messageId": 111}, {"messageId": 222}])
+    state = _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    def _event(gundi_id):
+        return Event(
+            gundi_id=gundi_id,
+            source_id=uuid.uuid4(),
+            external_source_id="rhino_carcass",  # SAME source for both events
+            recorded_at=datetime.now(tz=timezone.utc),
+            event_type="rhino_carcass",
+            title="Rhino Carcass",
+            location=Location(lat=0.0, lon=0.0),
+        )
+
+    for gid in ("gid-A", "gid-B"):
+        await action_deliver(
+            integration, deliver_config,
+            GundiDelivery(payload=_event(gid), provider=provider_info), metadata,
+        )
+
+    keys = {c.kwargs["source_id"]: c.kwargs["state"]["cmore_message_id"]
+            for c in state.set_state.call_args_list}
+    # Distinct gundi_id keys (would have collided on the shared external_source_id).
+    assert keys == {"gid-A": 111, "gid-B": 222}
 
 
 def test_extract_message_id_coerces_to_int():
