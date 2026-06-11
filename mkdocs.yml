@@ -17,6 +17,7 @@ theme:
 nav:
   - Overview: index.md
   - Configuration: configuration.md
+  - Troubleshooting: troubleshooting.md
 
 markdown_extensions:
   - admonition

@@ -62,3 +62,5 @@ credentials + the delivery mappings live in **this integration** (see
 - [**Configuration**](configuration.md) — the Authenticate and Deliver
   actions and every setting, plus the scaffold tool that helps author tag
   mappings.
+- [**Troubleshooting**](troubleshooting.md) — common symptoms (missing tags,
+  dropped values, deep link not showing) and how to diagnose them.
