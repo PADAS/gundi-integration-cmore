@@ -282,19 +282,24 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
-# Sentinel returned by the menus when the operator chooses to quit the wizard.
+# Sentinels for menu outcomes. Distinct objects because questionary's
+# Choice(value=None) defaults the value to the *title* string — so None can't
+# safely mark "skip".
 _QUIT = object()
+_SKIP = object()
 
 
-async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False):
+async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False, default=None):
     """Single-choice picker. Uses an arrow-key menu (questionary) on a real
     terminal; falls back to a numbered prompt when there's no TTY (piped
     input, CI, tests) or questionary isn't installed.
 
     ``options`` are the returned values; ``titles`` are optional display
-    strings parallel to ``options``. Returns the chosen value, or ``None``
-    if the operator skips. When ``allow_free_text`` (numbered fallback only),
-    a typed value that isn't a list number is returned verbatim.
+    strings parallel to ``options``. ``default`` (if it's one of ``options``)
+    is pre-selected — the current/existing mapping — so Enter keeps it.
+    Returns the chosen value, ``None`` if skipped. When ``allow_free_text``
+    (numbered fallback only), a typed value that isn't a list number is
+    returned verbatim.
 
     Quitting (the "quit" entry, ``q`` in the fallback, or Ctrl-C) raises
     ``click.Abort`` to exit the wizard cleanly without writing anything.
@@ -302,6 +307,7 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     import sys
 
     titles = titles or [str(o) for o in options]
+    has_default = default is not None and default in options
     try:
         import questionary
 
@@ -310,49 +316,75 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
         use_arrows = False
 
     if use_arrows:
-        choices = [questionary.Choice(title=t, value=v) for t, v in zip(titles, options)]
+        choices = []
+        for title, value in zip(titles, options):
+            label = title + ("   (current)" if has_default and value == default else "")
+            choices.append(questionary.Choice(title=label, value=value))
         if skip_label is not None:
-            choices.append(questionary.Choice(title=skip_label, value=None))
+            choices.append(questionary.Choice(title=skip_label, value=_SKIP))
         choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
+        kwargs = {"choices": choices, "qmark": "›"}
+        if has_default:
+            kwargs["default"] = default
         # unsafe_ask_async runs in the current event loop (we're inside
         # asyncio.run) AND re-raises KeyboardInterrupt so Ctrl-C quits rather
-        # than silently returning None (which would read as "skip").
+        # than silently returning None.
         try:
-            answer = await questionary.select(
-                message.strip(), choices=choices, qmark="›"
-            ).unsafe_ask_async()
+            answer = await questionary.select(message.strip(), **kwargs).unsafe_ask_async()
         except KeyboardInterrupt:
             raise click.Abort()
         if answer is _QUIT:
             raise click.Abort()
+        if answer is _SKIP:
+            return None
         return answer
 
     click.echo(message)
     for i, title in enumerate(titles, start=1):
-        click.echo(f"  {i}. {title}")
+        marker = "   (current)" if has_default and options[i - 1] == default else ""
+        click.echo(f"  {i}. {title}{marker}")
     parts = ["number"]
     if allow_free_text:
         parts.append("value")
     parts.append("q to quit")
-    tail = " (Enter to skip)" if skip_label is not None else ""
+    if has_default:
+        tail = f" (Enter to keep current: {default})"
+    elif skip_label is not None:
+        tail = " (Enter to skip)"
+    else:
+        tail = ""
     sel = click.prompt(f"  {' / '.join(parts)}{tail}", default="", show_default=False).strip()
     if sel.lower() == "q":
         raise click.Abort()
+    if not sel:
+        return default if has_default else None
     if sel.isdigit() and 1 <= int(sel) <= len(options):
         return options[int(sel) - 1]
-    if allow_free_text and sel:
+    if allow_free_text:
         return sel
     return None
 
 
-async def _interactive_fill(result, tag_info, er_fields):
+async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
     """Walk the scaffold with the operator: wire unmatched fields, then fill
     blank lookup value mappings. Each pick is an arrow-key menu on a TTY (see
-    ``_choose``). Mutates ``result`` in place."""
+    ``_choose``). If ``existing_entry`` (the current mapping for this event
+    type) is given, the previously-chosen field/value is pre-selected as the
+    default. Mutates ``result`` in place."""
     from .mapping_scaffold import FieldScaffold, suggest_lookup_value, _normalize
 
     er_by_key = {f.key: f for f in er_fields}
     LOOKUP_TYPES = ("Lookup", "FixedLookup")
+
+    # Existing mapping → defaults: er_key -> cmore_field, er_key -> {from: to}.
+    existing_field_by_key = {}
+    existing_value_by_key = {}
+    for fm in (existing_entry or {}).get("field_mappings", []):
+        existing_field_by_key[fm.get("event_details_key")] = fm.get("cmore_field_name")
+        existing_value_by_key[fm.get("event_details_key")] = {
+            vm["from_value"]: vm["to_value"]
+            for vm in fm.get("value_mappings", []) if vm.get("to_value")
+        }
 
     def _lookup_options(field_info):
         return [lk.get("value") for lk in (getattr(field_info, "lookups", None) or [])]
@@ -366,6 +398,7 @@ async def _interactive_fill(result, tag_info, er_fields):
         name = await _choose(
             f"\nER field '{er_key}' has no CMORE match — pick a CMORE field:",
             uncovered, titles=titles, skip_label="— skip this field —",
+            default=existing_field_by_key.get(er_key),
         )
         if name is None:
             continue
@@ -394,12 +427,14 @@ async def _interactive_fill(result, tag_info, er_fields):
         options = _lookup_options(field_info)
         er_field = er_by_key.get(field_scaffold.event_details_key)
         displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
+        existing_values = existing_value_by_key.get(field_scaffold.event_details_key, {})
         for vm in blanks:
             label = displays.get(vm["from_value"], "")
             shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
             chosen = await _choose(
                 f"\n{field_scaffold.cmore_field_name}  ←  {shown}",
                 options, skip_label="— drop this value —", allow_free_text=True,
+                default=existing_values.get(vm["from_value"]),
             )
             if chosen:
                 vm["to_value"] = chosen
@@ -439,6 +474,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         cmore_base = ctx.obj["base_url"]
         cmore_token = ctx.obj["token"]
         er_base = er_token = dest_integration = None
+        deliver_config_id, deliver_data, existing_entry = None, {}, None
 
         if connection:
             from gundi_client_v2 import GundiClient
@@ -457,7 +493,18 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             cmore_auth = _extract_auth_data(dest_integration)
             cmore_base = cmore_auth.get("base_url") or dest_integration.base_url or cmore_base
             cmore_token = cmore_auth.get("token") or cmore_token
+            # Existing deliver config → defaults for any mapping already set up.
+            deliver_config_id, deliver_data = _find_action_config(
+                dest_integration, ("push_events", "deliver", "push")
+            )
+            existing_entry = next(
+                (m for m in (deliver_data.get("event_type_to_tag") or [])
+                 if m.get("event_type") == event_type),
+                None,
+            )
             click.echo(f"Connection {connection}: provider={provider.name!r} destination={dest_integration.name!r}")
+            if existing_entry:
+                click.echo(f"Found an existing mapping for '{event_type}' → defaults pre-selected.")
 
         if not non_interactive:
             click.echo(
@@ -484,6 +531,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             resolved_tag = await _choose(
                 f"Select the CMORE tag to map '{event_type}' events to:",
                 sorted(index), titles=titles, skip_label=None,
+                default=(existing_entry or {}).get("tag_name"),
             )
         tag_info = index.get(resolved_tag) if resolved_tag else None
         if tag_info is None:
@@ -523,7 +571,7 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             click.echo("  Uncovered CMORE fields: " + ", ".join(result.uncovered_cmore_fields))
 
         if not non_interactive:
-            await _interactive_fill(result, tag_info, er_fields)
+            await _interactive_fill(result, tag_info, er_fields, existing_entry)
 
         entry = result.to_config_entry()
         rendered = json.dumps(entry, indent=2)
@@ -537,12 +585,11 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if write:
             if gundi is None or dest_integration is None:
                 raise click.UsageError("--write requires --connection (to locate the CMORE integration).")
-            config_id, deliver_data = _find_action_config(dest_integration, ("push_events", "deliver", "push"))
-            if config_id is None:
+            if deliver_config_id is None:
                 raise click.UsageError("Could not find a deliver/push action configuration on the CMORE integration.")
             new_data = merge_event_type_mapping(deliver_data, entry)
-            await gundi.update_integration_configuration(dest_integration.id, config_id, new_data)
-            click.echo(f"\nWrote mapping back to CMORE integration {dest_integration.id} (config {config_id}).")
+            await gundi.update_integration_configuration(dest_integration.id, deliver_config_id, new_data)
+            click.echo(f"\nWrote mapping back to CMORE integration {dest_integration.id} (config {deliver_config_id}).")
 
         if gundi is not None:
             await gundi.close()

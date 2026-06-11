@@ -6,11 +6,14 @@ Exercises the file-input path and the pure merge helper.
 import json
 import os
 
+import pytest
 from click.testing import CliRunner
 
 from types import SimpleNamespace
 
+import app.datasource.cli as cli_module
 from app.datasource.cli import (
+    _choose,
     _extract_auth_data,
     _find_action_config,
     cli,
@@ -136,6 +139,28 @@ def test_interactive_picker_and_value_fill(tmp_path):
     species = by_field["Rhino Spesies"]["value_mappings"]
     assert {"from_value": "bw", "to_value": "Black"} in species
     assert {"from_value": "wt", "to_value": "White"} in species
+
+
+@pytest.mark.asyncio
+async def test_choose_fallback_number_default_skip_quit(mocker):
+    """Numbered-fallback _choose: number selects, Enter keeps the default (or
+    skips when no default), and 'q' aborts."""
+    mocker.patch("sys.stdin.isatty", return_value=False)  # force numbered fallback
+
+    mocker.patch.object(cli_module.click, "prompt", return_value="2")
+    assert await _choose("m", ["A", "B", "C"], skip_label="skip") == "B"
+
+    # Enter (empty) keeps the pre-selected current/default.
+    mocker.patch.object(cli_module.click, "prompt", return_value="")
+    assert await _choose("m", ["A", "B", "C"], skip_label="skip", default="C") == "C"
+
+    # Enter with no default → skip (None).
+    assert await _choose("m", ["A", "B"], skip_label="skip") is None
+
+    # 'q' quits the wizard.
+    mocker.patch.object(cli_module.click, "prompt", return_value="q")
+    with pytest.raises(cli_module.click.Abort):
+        await _choose("m", ["A"], skip_label="skip")
 
 
 def test_interactive_quit_aborts_without_writing(tmp_path):
