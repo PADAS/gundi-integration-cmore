@@ -311,7 +311,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
 
     if use_arrows:
         choices = [questionary.Choice(title=t, value=v) for t, v in zip(titles, options)]
-        choices.append(questionary.Choice(title=skip_label, value=None))
+        if skip_label is not None:
+            choices.append(questionary.Choice(title=skip_label, value=None))
         choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
         # unsafe_ask_async runs in the current event loop (we're inside
         # asyncio.run) AND re-raises KeyboardInterrupt so Ctrl-C quits rather
@@ -329,12 +330,12 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     click.echo(message)
     for i, title in enumerate(titles, start=1):
         click.echo(f"  {i}. {title}")
-    hint = (
-        "number / value, q to quit (Enter to skip)"
-        if allow_free_text
-        else "number, q to quit (Enter to skip)"
-    )
-    sel = click.prompt(f"  {hint}", default="", show_default=False).strip()
+    parts = ["number"]
+    if allow_free_text:
+        parts.append("value")
+    parts.append("q to quit")
+    tail = " (Enter to skip)" if skip_label is not None else ""
+    sel = click.prompt(f"  {' / '.join(parts)}{tail}", default="", show_default=False).strip()
     if sel.lower() == "q":
         raise click.Abort()
     if sel.isdigit() and 1 <= int(sel) <= len(options):
@@ -458,6 +459,13 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             cmore_token = cmore_auth.get("token") or cmore_token
             click.echo(f"Connection {connection}: provider={provider.name!r} destination={dest_integration.name!r}")
 
+        if not non_interactive:
+            click.echo(
+                f"\nBuilding an ER → CMORE mapping for event_type '{event_type}'.\n"
+                "At each prompt: ↑/↓ + Enter to choose (or type the number), "
+                "pick “quit” / press Ctrl-C to exit.\n"
+            )
+
         # CMORE tag schema
         if tags_file:
             with open(tags_file) as fh:
@@ -470,9 +478,14 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         index = _build_index(raw_tags)
         resolved_tag = tag_name
         if not resolved_tag:
-            click.echo("Available CMORE tags: " + ", ".join(sorted(index)))
-            resolved_tag = click.prompt("CMORE tag name")
-        tag_info = index.get(resolved_tag)
+            # Pick the CMORE tag from a menu (arrow-key on a TTY) rather than
+            # making the operator type the exact name.
+            titles = [f"{name}  ({index[name].domain})" for name in sorted(index)]
+            resolved_tag = await _choose(
+                f"Select the CMORE tag to map '{event_type}' events to:",
+                sorted(index), titles=titles, skip_label=None,
+            )
+        tag_info = index.get(resolved_tag) if resolved_tag else None
         if tag_info is None:
             raise click.UsageError(f"CMORE tag {resolved_tag!r} not found in the tag schema.")
 
