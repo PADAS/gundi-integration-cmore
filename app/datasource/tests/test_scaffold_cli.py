@@ -138,6 +138,24 @@ def test_interactive_picker_and_value_fill(tmp_path):
     assert {"from_value": "wt", "to_value": "White"} in species
 
 
+def test_interactive_quit_aborts_without_writing(tmp_path):
+    """Entering 'q' at a prompt aborts the wizard (no output written)."""
+    tags_file = tmp_path / "tags.json"
+    tags_file.write_text(json.dumps(_INTERACTIVE_TAGS))
+    schema_file = tmp_path / "schema.json"
+    schema_file.write_text(json.dumps(_INTERACTIVE_SCHEMA))
+    out_file = tmp_path / "mapping.json"
+
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "scaffold-mapping", "--event-type", "rhino_carcass", "--tag", "Rhino Carcass",
+        "--tags-file", str(tags_file), "--er-schema-file", str(schema_file),
+        "--out", str(out_file),
+    ], input="q\n")
+    assert result.exit_code != 0  # click.Abort
+    assert not out_file.exists()
+
+
 def test_scaffold_mapping_offline_end_to_end(tmp_path):
     """Run the CLI against the REAL ER schema dump + a minimal Wildlife tag."""
     tags_file = tmp_path / "tags.json"

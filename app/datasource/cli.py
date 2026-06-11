@@ -282,6 +282,10 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
+# Sentinel returned by the menus when the operator chooses to quit the wizard.
+_QUIT = object()
+
+
 async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False):
     """Single-choice picker. Uses an arrow-key menu (questionary) on a real
     terminal; falls back to a numbered prompt when there's no TTY (piped
@@ -291,6 +295,9 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     strings parallel to ``options``. Returns the chosen value, or ``None``
     if the operator skips. When ``allow_free_text`` (numbered fallback only),
     a typed value that isn't a list number is returned verbatim.
+
+    Quitting (the "quit" entry, ``q`` in the fallback, or Ctrl-C) raises
+    ``click.Abort`` to exit the wizard cleanly without writing anything.
     """
     import sys
 
@@ -305,15 +312,31 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     if use_arrows:
         choices = [questionary.Choice(title=t, value=v) for t, v in zip(titles, options)]
         choices.append(questionary.Choice(title=skip_label, value=None))
-        # ask_async runs in the current event loop (we're inside asyncio.run);
-        # the sync .ask() would try to start its own loop and blow up.
-        return await questionary.select(message.strip(), choices=choices, qmark="›").ask_async()
+        choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
+        # unsafe_ask_async runs in the current event loop (we're inside
+        # asyncio.run) AND re-raises KeyboardInterrupt so Ctrl-C quits rather
+        # than silently returning None (which would read as "skip").
+        try:
+            answer = await questionary.select(
+                message.strip(), choices=choices, qmark="›"
+            ).unsafe_ask_async()
+        except KeyboardInterrupt:
+            raise click.Abort()
+        if answer is _QUIT:
+            raise click.Abort()
+        return answer
 
     click.echo(message)
     for i, title in enumerate(titles, start=1):
         click.echo(f"  {i}. {title}")
-    hint = "number / value (Enter to skip)" if allow_free_text else "number (Enter to skip)"
+    hint = (
+        "number / value, q to quit (Enter to skip)"
+        if allow_free_text
+        else "number, q to quit (Enter to skip)"
+    )
     sel = click.prompt(f"  {hint}", default="", show_default=False).strip()
+    if sel.lower() == "q":
+        raise click.Abort()
     if sel.isdigit() and 1 <= int(sel) <= len(options):
         return options[int(sel) - 1]
     if allow_free_text and sel:
