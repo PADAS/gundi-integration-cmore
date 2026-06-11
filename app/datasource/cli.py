@@ -249,6 +249,18 @@ def post_event(ctx, description, lat, lon, altitude, accuracy, date_occurred, ow
     run(_run())
 
 
+def _ensure_scheme(url):
+    """Prepend https:// if a base URL has no scheme.
+
+    Integration base_urls in Gundi are sometimes stored as bare hosts
+    (e.g. ``gundi-er.pamdas.org``); httpx rejects a schemeless URL with
+    UnsupportedProtocol.
+    """
+    if url and not url.startswith(("http://", "https://")):
+        return "https://" + url
+    return url
+
+
 def _extract_auth_data(integration) -> dict:
     """Return the 'auth' action configuration's data dict for an integration,
     or {} if not present/readable."""
@@ -522,13 +534,15 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
             provider = await gundi.get_integration_details(conn.provider.id)
             dest_integration = await gundi.get_integration_details(conn.destinations[0].id)
             er_auth = _extract_auth_data(provider)
-            er_base = er_auth.get("base_url") or provider.base_url
+            er_base = _ensure_scheme(er_auth.get("base_url") or provider.base_url)
             er_token = er_auth.get("token") or er_token
             # CMORE's API lives under a path (e.g. /za/WebAPI/api) that the
             # integration's top-level base_url omits; the auth config carries the
             # full API base the runner actually uses, so prefer it.
             cmore_auth = _extract_auth_data(dest_integration)
-            cmore_base = cmore_auth.get("base_url") or dest_integration.base_url or cmore_base
+            cmore_base = _ensure_scheme(
+                cmore_auth.get("base_url") or dest_integration.base_url or cmore_base
+            )
             cmore_token = cmore_auth.get("token") or cmore_token
             # Existing deliver config → defaults for any mapping already set up.
             deliver_config_id, deliver_data = _find_action_config(
