@@ -282,11 +282,47 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     return data
 
 
+def _choose(message, options, *, skip_label, titles=None, allow_free_text=False):
+    """Single-choice picker. Uses an arrow-key menu (questionary) on a real
+    terminal; falls back to a numbered prompt when there's no TTY (piped
+    input, CI, tests) or questionary isn't installed.
+
+    ``options`` are the returned values; ``titles`` are optional display
+    strings parallel to ``options``. Returns the chosen value, or ``None``
+    if the operator skips. When ``allow_free_text`` (numbered fallback only),
+    a typed value that isn't a list number is returned verbatim.
+    """
+    import sys
+
+    titles = titles or [str(o) for o in options]
+    try:
+        import questionary
+
+        use_arrows = sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        use_arrows = False
+
+    if use_arrows:
+        choices = [questionary.Choice(title=t, value=v) for t, v in zip(titles, options)]
+        choices.append(questionary.Choice(title=skip_label, value=None))
+        return questionary.select(message.strip(), choices=choices, qmark="›").ask()
+
+    click.echo(message)
+    for i, title in enumerate(titles, start=1):
+        click.echo(f"  {i}. {title}")
+    hint = "number / value (Enter to skip)" if allow_free_text else "number (Enter to skip)"
+    sel = click.prompt(f"  {hint}", default="", show_default=False).strip()
+    if sel.isdigit() and 1 <= int(sel) <= len(options):
+        return options[int(sel) - 1]
+    if allow_free_text and sel:
+        return sel
+    return None
+
+
 def _interactive_fill(result, tag_info, er_fields):
-    """Walk the scaffold with the operator: wire unmatched fields (numbered
-    pick), then fill blank lookup value mappings (options listed once per
-    field; each source value shown with its ER display label). Mutates
-    ``result`` in place."""
+    """Walk the scaffold with the operator: wire unmatched fields, then fill
+    blank lookup value mappings. Each pick is an arrow-key menu on a TTY (see
+    ``_choose``). Mutates ``result`` in place."""
     from .mapping_scaffold import FieldScaffold, suggest_lookup_value, _normalize
 
     er_by_key = {f.key: f for f in er_fields}
@@ -300,13 +336,14 @@ def _interactive_fill(result, tag_info, er_fields):
     for er_key in list(result.unmatched_er_fields):
         if not uncovered:
             break
-        click.echo(f"\nER field '{er_key}' has no CMORE match. Pick a CMORE field:")
-        for i, name in enumerate(uncovered, start=1):
-            click.echo(f"  {i}. {name} ({tag_info.field_by_name(name).data_type})")
-        sel = click.prompt("  number (Enter to skip)", default="", show_default=False).strip()
-        if not (sel.isdigit() and 1 <= int(sel) <= len(uncovered)):
+        titles = [f"{n}  ({tag_info.field_by_name(n).data_type})" for n in uncovered]
+        name = _choose(
+            f"\nER field '{er_key}' has no CMORE match — pick a CMORE field:",
+            uncovered, titles=titles, skip_label="— skip this field —",
+        )
+        if name is None:
             continue
-        name = uncovered.pop(int(sel) - 1)
+        uncovered.remove(name)
         result.unmatched_er_fields.remove(er_key)
         scaffold = FieldScaffold(event_details_key=er_key, cmore_field_name=name)
         # Seed value mappings for a newly-wired lookup field from its ER choices.
@@ -321,8 +358,8 @@ def _interactive_fill(result, tag_info, er_fields):
                     scaffold.value_mappings.append({"from_value": choice.value, "to_value": option})
         result.fields.append(scaffold)
 
-    # 2) Fill blank value mappings — group by field, list options once, show
-    #    each source value's display label so the choice is obvious.
+    # 2) Fill blank value mappings — each source value shown with its ER
+    #    display label so the choice is obvious.
     for field_scaffold in result.fields:
         blanks = [vm for vm in field_scaffold.value_mappings if not vm["to_value"]]
         if not blanks:
@@ -331,20 +368,15 @@ def _interactive_fill(result, tag_info, er_fields):
         options = _lookup_options(field_info)
         er_field = er_by_key.get(field_scaffold.event_details_key)
         displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
-
-        click.echo(f"\n{field_scaffold.cmore_field_name} — pick the CMORE value for each source value:")
-        for i, opt in enumerate(options, start=1):
-            click.echo(f"  {i}. {opt}")
         for vm in blanks:
             label = displays.get(vm["from_value"], "")
             shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
-            picked = click.prompt(
-                f"  {shown}  →  number / value (Enter to drop)", default="", show_default=False
-            ).strip()
-            if picked.isdigit() and 1 <= int(picked) <= len(options):
-                vm["to_value"] = options[int(picked) - 1]
-            elif picked:
-                vm["to_value"] = picked
+            chosen = _choose(
+                f"\n{field_scaffold.cmore_field_name}  ←  {shown}",
+                options, skip_label="— drop this value —", allow_free_text=True,
+            )
+            if chosen:
+                vm["to_value"] = chosen
         field_scaffold.value_mappings = [vm for vm in field_scaffold.value_mappings if vm["to_value"]]
 
 
