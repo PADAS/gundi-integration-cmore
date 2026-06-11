@@ -435,17 +435,29 @@ def _get_source_event_url(event: schemas.v2.Event) -> Optional[str]:
     return url if isinstance(url, str) and url else None
 
 
+def _get_serial_number(event: schemas.v2.Event):
+    """Pull the source event's serial number out of event.provider_metadata
+    (set by the EarthRanger runner). Returns None if absent/malformed."""
+    pm = event.provider_metadata or {}
+    if not isinstance(pm, dict):
+        return None
+    return pm.get("serial_number")
+
+
 def _build_event_description(event: schemas.v2.Event) -> str:
     """Render the CMORE event description.
 
-    Just the event title. The source deep-link is NOT included here — it is
-    posted as a comment immediately after ``post_event`` (see ``_push_event``),
-    which keeps the title clean while still surfacing the cross-reference in
-    CMORE's detail view.
+    The event title, with the source event's serial number appended when
+    available (e.g. "Rhino Carcass (#267)"). The deep-link is NOT included
+    here — it's posted as a comment after ``post_event`` (see ``_push_event``).
 
     Title fallback chain: title → event_type slug → "Gundi Event".
     """
-    return event.title or event.event_type or "Gundi Event"
+    base = event.title or event.event_type or "Gundi Event"
+    serial = _get_serial_number(event)
+    if serial is not None:
+        return f"{base} (#{serial})"
+    return base
 
 
 async def _push_event(
@@ -523,17 +535,23 @@ async def _push_event(
         )
         cmore_message_id = _extract_message_id(response)
 
-        # Post the source deep-link URL as a comment so it surfaces in CMORE's
-        # event detail view. This is the sole place the link is rendered — it
-        # is intentionally kept out of the event title/description. Only when
-        # both the URL was attached upstream AND we got a messageId back.
+        # Post a comment carrying the source cross-reference — the EarthRanger
+        # serial number and the deep-link URL — so they surface in CMORE's event
+        # detail view (kept out of the title except for the serial). Posted when
+        # we have a messageId AND at least one of serial / URL is present.
         source_event_url = _get_source_event_url(event)
-        if source_event_url and cmore_message_id is not None:
-            comment_body = f"Source: {source_event_url}"
+        serial = _get_serial_number(event)
+        if cmore_message_id is not None and (source_event_url or serial is not None):
+            parts = []
+            if serial is not None:
+                parts.append(f"EarthRanger event #{serial}")
+            if source_event_url:
+                parts.append(f"Source: {source_event_url}")
+            comment_body = " — ".join(parts)
             # Diagnostic: log the outbound comment body so it can be
             # cross-checked against what shows up in CMORE's UI.
             logger.info(
-                "Posting CMORE deep-link comment: description=%r root_message_id=%s",
+                "Posting CMORE source comment: description=%r root_message_id=%s",
                 comment_body,
                 cmore_message_id,
             )
@@ -543,16 +561,17 @@ async def _push_event(
                 uploadType=UploadType.GENERATED,
             ))
             logger.info(
-                "Posted CMORE deep-link comment (root_message_id=%s).",
+                "Posted CMORE source comment (root_message_id=%s).",
                 cmore_message_id,
             )
         else:
-            # Explicit "we didn't post a comment" log so an absent URL is
-            # distinguishable from a posted-but-invisible URL.
+            # Explicit "we didn't post a comment" log so an absent source ref is
+            # distinguishable from a posted-but-invisible one.
             logger.info(
-                "Skipping CMORE deep-link comment: source_event_url=%r "
+                "Skipping CMORE source comment: source_event_url=%r serial=%r "
                 "cmore_message_id=%r",
                 source_event_url,
+                serial,
                 cmore_message_id,
             )
 

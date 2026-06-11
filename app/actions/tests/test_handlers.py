@@ -1091,6 +1091,82 @@ async def test_deliver_event_also_posts_deep_link_as_comment(
     assert sent_comment.description.startswith("Source:")
 
 
+def test_build_event_description_appends_serial_number():
+    """The source event's serial number is appended to the title."""
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Rhino Carcass",
+        provider_metadata={"serial_number": 267},
+    )
+    assert _build_event_description(e) == "Rhino Carcass (#267)"
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_comment_includes_serial_and_deep_link(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """The source comment carries both the ER serial number and the deep-link,
+    and the serial is appended to the posted event's title."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Rhino Carcass",
+        location=Location(lat=0.0, lon=0.0),
+        provider_metadata={
+            "serial_number": 267,
+            "source_event_url": "https://gundi-er.pamdas.org/events/abc",
+        },
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    # Serial in the posted event's title.
+    posted = inner.post_event.call_args.args[0]
+    assert posted.description == "Rhino Carcass (#267)"
+
+    # Serial + deep-link in the comment.
+    sent_comment = inner.post_comment.call_args.args[0]
+    assert "#267" in sent_comment.description
+    assert "https://gundi-er.pamdas.org/events/abc" in sent_comment.description
+
+
+@pytest.mark.asyncio
+async def test_deliver_event_comment_serial_only_when_no_deep_link(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    """A serial with no deep-link still posts a comment (with just the serial)."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+
+    e = Event(
+        source_id=uuid.uuid4(),
+        external_source_id="er-uuid",
+        recorded_at=datetime.now(tz=timezone.utc),
+        title="Rhino Carcass",
+        location=Location(lat=0.0, lon=0.0),
+        provider_metadata={"serial_number": 267},
+    )
+    delivery = GundiDelivery(payload=e, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_comment.assert_awaited_once()
+    sent_comment = inner.post_comment.call_args.args[0]
+    assert "#267" in sent_comment.description
+    assert "Source:" not in sent_comment.description
+
+
 @pytest.mark.asyncio
 async def test_deliver_event_skips_deep_link_comment_when_no_url(
     mocker, integration, deliver_config, provider_info, metadata
