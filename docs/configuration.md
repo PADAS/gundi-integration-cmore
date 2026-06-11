@@ -8,7 +8,7 @@ All settings are configured on the **CMORE destination integration** in the
 Gundi portal. The integration exposes two actions: **Authenticate** and
 **Deliver**.
 
-[← Overview](index.html)
+[← Overview](index.md)
 
 ---
 
@@ -97,4 +97,4 @@ Run without `--write` (or with `--out FILE`) to just print the config.
 Other useful CLI commands: `get-tags` (dump the CMORE tag schema visible to a
 token) and `get-classification-tree` (valid classification values).
 
-[← Overview](index.html)
+[← Overview](index.md)

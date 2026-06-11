@@ -51,7 +51,7 @@ The pieces are configured independently: EarthRanger access and pull filters
 (which subjects/event types to share, how often to poll) live in the
 **EarthRanger integration**; routing rules live in **Gundi**; and CMORE
 credentials + the delivery mappings live in **this integration** (see
-[Configuration](configuration.html)).
+[Configuration](configuration.md)).
 
 > cdip-routing forwards traffic to this runner via the generic-model path
 > (a `GundiDelivery` envelope) because `cmore` is a generic-model destination
@@ -59,6 +59,6 @@ credentials + the delivery mappings live in **this integration** (see
 
 ## Next
 
-- [**Configuration**](configuration.html) — the Authenticate and Deliver
+- [**Configuration**](configuration.md) — the Authenticate and Deliver
   actions and every setting, plus the scaffold tool that helps author tag
   mappings.

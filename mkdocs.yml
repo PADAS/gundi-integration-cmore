@@ -1,0 +1,38 @@
+site_name: Gundi CMORE Action Runner
+site_description: What the CMORE destination action runner does and how to configure it.
+repo_url: https://github.com/PADAS/gundi-integration-cmore
+repo_name: PADAS/gundi-integration-cmore
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: green
+      accent: green
+  features:
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+
+nav:
+  - Overview: index.md
+  - Configuration: configuration.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+# docs_dir defaults to docs/. That folder also holds third-party CMORE PDFs and
+# internal planning notes — exclude them so only the curated pages are built
+# (the repo is public).
+exclude_docs: |
+  *.pdf
+  *.json
+  Cmore API Reference.html
+  executive-brief-cmore-integration.md
+  implementation-plans.md
+  portal-rendering-workaround.md
+  Untitled.md
