@@ -287,11 +287,12 @@ def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
 # safely mark "skip".
 _QUIT = object()       # abort the whole wizard
 _SKIP = object()       # skip just this item (→ None)
-_SKIP_ALL = object()   # skip the rest of the current property/field
+_SKIP_ALL = object()   # accept current values for the rest of this field, advance
+_BACK = object()       # go back to the previous field
 
 
 async def _choose(message, options, *, skip_label, titles=None, allow_free_text=False,
-                  default=None, skip_all_label=None):
+                  default=None, skip_all_label=None, back_label=None):
     """Single-choice picker. Uses an arrow-key menu (questionary) on a real
     terminal; falls back to a numbered prompt when there's no TTY (piped
     input, CI, tests) or questionary isn't installed.
@@ -326,6 +327,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
             choices.append(questionary.Choice(title=skip_label, value=_SKIP))
         if skip_all_label is not None:
             choices.append(questionary.Choice(title=skip_all_label, value=_SKIP_ALL))
+        if back_label is not None:
+            choices.append(questionary.Choice(title=back_label, value=_BACK))
         choices.append(questionary.Choice(title="✗ quit (discard & exit)", value=_QUIT))
         kwargs = {"choices": choices, "qmark": "›"}
         if has_default:
@@ -341,7 +344,7 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
             raise click.Abort()
         if answer is _SKIP:
             return None
-        return answer
+        return answer  # may be _SKIP_ALL or _BACK sentinel, or a chosen value
 
     click.echo(message)
     for i, title in enumerate(titles, start=1):
@@ -351,7 +354,9 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     if allow_free_text:
         parts.append("value")
     if skip_all_label is not None:
-        parts.append("s to skip field")
+        parts.append("n for next field")
+    if back_label is not None:
+        parts.append("b to go back")
     parts.append("q to quit")
     if has_default:
         tail = f" (Enter to keep current: {default})"
@@ -362,7 +367,9 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     sel = click.prompt(f"  {' / '.join(parts)}{tail}", default="", show_default=False).strip()
     if sel.lower() == "q":
         raise click.Abort()
-    if skip_all_label is not None and sel.lower() == "s":
+    if back_label is not None and sel.lower() == "b":
+        return _BACK
+    if skip_all_label is not None and sel.lower() == "n":
         return _SKIP_ALL
     if not sel:
         return default if has_default else None
@@ -425,31 +432,47 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
                     scaffold.value_mappings.append({"from_value": choice.value, "to_value": option})
         result.fields.append(scaffold)
 
-    # 2) Fill blank value mappings — each source value shown with its ER
-    #    display label so the choice is obvious.
-    for field_scaffold in result.fields:
-        blanks = [vm for vm in field_scaffold.value_mappings if not vm["to_value"]]
-        if not blanks:
-            continue
-        field_info = tag_info.field_by_name(field_scaffold.cmore_field_name)
+    # 2) Fill value mappings — navigate fields with next/back. Each source
+    #    value is shown with its ER display label and its current/existing
+    #    value pre-selected, so Enter keeps it.
+    nav_fields = [fs for fs in result.fields if fs.value_mappings]
+    fi = 0
+    while 0 <= fi < len(nav_fields):
+        fs = nav_fields[fi]
+        field_info = tag_info.field_by_name(fs.cmore_field_name)
         options = _lookup_options(field_info)
-        er_field = er_by_key.get(field_scaffold.event_details_key)
+        er_field = er_by_key.get(fs.event_details_key)
         displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
-        existing_values = existing_value_by_key.get(field_scaffold.event_details_key, {})
-        for vm in blanks:
+        existing_values = existing_value_by_key.get(fs.event_details_key, {})
+
+        go_back = False
+        for vi, vm in enumerate(fs.value_mappings):
+            current = vm["to_value"] or existing_values.get(vm["from_value"])
             label = displays.get(vm["from_value"], "")
             shown = vm["from_value"] + (f"  ({label})" if label and label != vm["from_value"] else "")
             chosen = await _choose(
-                f"\n{field_scaffold.cmore_field_name}  ←  {shown}",
+                f"\n[field {fi + 1}/{len(nav_fields)}] {fs.cmore_field_name}  ←  {shown}",
                 options, skip_label="— drop this value —", allow_free_text=True,
-                default=existing_values.get(vm["from_value"]),
-                skip_all_label="— skip this field (leave remaining values unmapped) —",
+                default=current,
+                skip_all_label="→ next field (keep current values for the rest)",
+                back_label=("← back to previous field" if fi > 0 else None),
             )
+            if chosen is _BACK:
+                go_back = True
+                break
             if chosen is _SKIP_ALL:
-                break  # stop prompting for this property's remaining values
-            if chosen:
-                vm["to_value"] = chosen
-        field_scaffold.value_mappings = [vm for vm in field_scaffold.value_mappings if vm["to_value"]]
+                # Accept current/existing for this value and the remaining ones.
+                for rest in fs.value_mappings[vi:]:
+                    keep = rest["to_value"] or existing_values.get(rest["from_value"])
+                    if keep:
+                        rest["to_value"] = keep
+                break
+            # A picked value, or None when dropped / Enter with no current.
+            vm["to_value"] = chosen or ""
+        fi = fi - 1 if go_back else fi + 1
+
+    for fs in result.fields:
+        fs.value_mappings = [vm for vm in fs.value_mappings if vm["to_value"]]
 
 
 @cli.command("scaffold-mapping")

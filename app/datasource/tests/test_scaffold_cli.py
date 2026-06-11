@@ -157,16 +157,48 @@ async def test_choose_fallback_number_default_skip_quit(mocker):
     # Enter with no default → skip (None).
     assert await _choose("m", ["A", "B"], skip_label="skip") is None
 
-    # 's' skips the rest of the current field when skip_all_label is offered.
-    mocker.patch.object(cli_module.click, "prompt", return_value="s")
-    assert await _choose("m", ["A"], skip_label="skip", skip_all_label="skip field") is cli_module._SKIP_ALL
-    # ...but 's' is not special unless skip_all_label is set (treated as a value).
-    assert await _choose("m", ["A"], skip_label="skip", allow_free_text=True) == "s"
+    # 'n' advances to the next field when skip_all_label is offered.
+    mocker.patch.object(cli_module.click, "prompt", return_value="n")
+    assert await _choose("m", ["A"], skip_label="skip", skip_all_label="next field") is cli_module._SKIP_ALL
+    # ...but 'n' is not special unless skip_all_label is set (treated as a value).
+    assert await _choose("m", ["A"], skip_label="skip", allow_free_text=True) == "n"
+
+    # 'b' goes back when back_label is offered.
+    mocker.patch.object(cli_module.click, "prompt", return_value="b")
+    assert await _choose("m", ["A"], skip_label="skip", back_label="back") is cli_module._BACK
 
     # 'q' quits the wizard.
     mocker.patch.object(cli_module.click, "prompt", return_value="q")
     with pytest.raises(cli_module.click.Abort):
         await _choose("m", ["A"], skip_label="skip")
+
+
+def test_interactive_next_and_back_navigation(tmp_path):
+    """'n' advances to the next field; 'b' returns to the previous one to edit."""
+    tags_file = tmp_path / "tags.json"
+    tags_file.write_text(json.dumps(_INTERACTIVE_TAGS))
+    schema_file = tmp_path / "schema.json"
+    schema_file.write_text(json.dumps(_INTERACTIVE_SCHEMA))
+    out_file = tmp_path / "mapping.json"
+
+    # Phase 1: species → Rhino Spesies (1). Phase 2 fields: [Animal Sex, Rhino
+    # Spesies]. At Animal Sex: 'n' (skip ahead). At Rhino Spesies: 'b' (back).
+    # Back at Animal Sex: '3' (Indeterminable). At Rhino Spesies: 2 (Black),
+    # 1 (White).
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "scaffold-mapping", "--event-type", "rhino_carcass", "--tag", "Rhino Carcass",
+        "--tags-file", str(tags_file), "--er-schema-file", str(schema_file),
+        "--out", str(out_file),
+    ], input="1\nn\nb\n3\n2\n1\n")
+    assert result.exit_code == 0, result.output
+
+    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    # Going back let us set Animal Sex after initially skipping it.
+    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    species = by_field["Rhino Spesies"]["value_mappings"]
+    assert {"from_value": "bw", "to_value": "Black"} in species
+    assert {"from_value": "wt", "to_value": "White"} in species
 
 
 def test_interactive_quit_aborts_without_writing(tmp_path):
