@@ -1,4 +1,4 @@
-name: Docs
+name: docs
 
 on:
   push:
@@ -6,37 +6,37 @@ on:
     paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
   pull_request:
     paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+  # Allow manual triggers from the Actions UI.
+  workflow_dispatch:
 
+# gh-deploy commits the built site to the gh-pages branch.
 permissions:
-  contents: read
+  contents: write
+
+# Serialize deploys so two pushes to main in quick succession don't race on
+# gh-deploy --force.
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
 
 jobs:
-  # Build on every PR (and on main) — `--strict` fails on broken links or
-  # pages missing from the nav, so docs issues are caught before publishing.
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gh-deploy needs full history to commit to gh-pages.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - run: pip install mkdocs-material==9.7.6
-      - run: mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  # Deploy only from main. Requires repo Settings → Pages → Source = GitHub Actions.
-  deploy:
-    if: github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      # --strict catches broken internal links and pages missing from the nav.
+      # Runs on PRs too (validation); the deploy step below is gated to main.
+      - name: Build site
+        run: mkdocs build --strict
+      # Publishes to the gh-pages branch (Pages source: Deploy from a branch),
+      # matching gundi-client / earthranger-smart-utils.
+      - name: Deploy to gh-pages
+        if: github.ref == 'refs/heads/main'
+        run: mkdocs gh-deploy --force
