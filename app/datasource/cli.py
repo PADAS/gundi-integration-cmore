@@ -318,6 +318,8 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
     except Exception:
         use_arrows = False
 
+    click.echo()  # blank line to separate this prompt from prior output
+
     if use_arrows:
         choices = []
         for title, value in zip(titles, options):
@@ -346,7 +348,7 @@ async def _choose(message, options, *, skip_label, titles=None, allow_free_text=
             return None
         return answer  # may be _SKIP_ALL or _BACK sentinel, or a chosen value
 
-    click.echo(message)
+    click.echo(message.strip())
     for i, title in enumerate(titles, start=1):
         marker = "   (current)" if has_default and options[i - 1] == default else ""
         click.echo(f"  {i}. {title}{marker}")
