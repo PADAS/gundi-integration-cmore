@@ -237,6 +237,14 @@ class DeliverConfig(PushActionConfiguration):
         Once GUNDI-5371 (portal bug for additionalProperties-of-object) is
         fixed, this config can be reverted to the cleaner Dict shape and the
         ui_schema simplified accordingly.
+
+        Every nested object level declares an explicit "ui:order": the portal
+        stores schemas in Postgres jsonb, which canonicalizes JSON object key
+        order (shortest key first, then bytewise), so schema property order
+        does not survive storage and nested models otherwise render in
+        arbitrary order. Arrays DO survive jsonb, which is why ui:order works.
+        The orders are derived from the models' field order so the form always
+        matches the source of truth.
         """
         base = super().ui_schema(*args, **kwargs)
         base.update({
@@ -248,6 +256,7 @@ class DeliverConfig(PushActionConfiguration):
             ],
             "event_type_to_tag": {
                 "items": {
+                    "ui:order": list(CmoreTagMapping.__fields__),
                     "event_type": {"ui:placeholder": "e.g. poacher_sighting"},
                     "tag_name": {
                         "ui:placeholder": "e.g. Poacher Sighting",
@@ -258,10 +267,12 @@ class DeliverConfig(PushActionConfiguration):
                     },
                     "field_mappings": {
                         "items": {
+                            "ui:order": list(CmoreFieldMapping.__fields__),
                             "event_details_key": {"ui:placeholder": "e.g. animal_sex"},
                             "cmore_field_name": {"ui:placeholder": "e.g. Animal Sex"},
                             "value_mappings": {
                                 "items": {
+                                    "ui:order": list(CmoreValueMapping.__fields__),
                                     "from_value": {"ui:placeholder": "e.g. b_3_months1_year"},
                                     "to_value": {"ui:placeholder": "e.g. Calf"},
                                 },
@@ -272,11 +283,13 @@ class DeliverConfig(PushActionConfiguration):
             },
             "subject_type_to_affiliation": {
                 "items": {
+                    "ui:order": list(SubjectAffiliationMapping.__fields__),
                     "subject_type": {"ui:placeholder": "e.g. ranger"},
                 },
             },
             "subject_type_to_classification": {
                 "items": {
+                    "ui:order": list(SubjectClassificationMapping.__fields__),
                     "subject_type": {"ui:placeholder": "e.g. ranger"},
                     "battleDimension": {"ui:placeholder": "e.g. LAND"},
                     "force": {"ui:placeholder": "e.g. ANIMAL"},
