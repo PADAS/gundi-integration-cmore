@@ -165,37 +165,38 @@ Rhino Carcass tag.
 
 ### 2.1 Open your connection's CMORE destination
 
-1. Sign in to the Gundi portal and open **Connections**. A connection links a
-   *source* (your EarthRanger site) to one or more *destinations* (CMORE).
+1. Sign in to the Gundi portal and open **Connections**, then your
+   connection. A connection links a *source* (your EarthRanger site) to one
+   or more *destinations* (CMORE). Its page has five tabs: **General**,
+   **Provider**, **Destinations**, **Sources**, and **Logs**. Open the
+   **Destinations** tab — your CMORE destination is listed there.
 
-   <!-- SHOT: gundi-01-connection-view — page: https://gundiservice.org/connections/b729de34-934f-4d3c-a398-ea668c688374, state: connection overview showing ER source and CMORE destination, crop: full page -->
-   ![The connection: EarthRanger source routed to the CMORE destination](images/gundi-01-connection-view.png)
+   ![The connection's Destinations tab with the CMORE destination](images/gundi-01-connection-view.png)
 
-2. Click the CMORE destination, then open its **Configuration** tab. You'll
-   see two sections: **Authenticate** and **Deliver**.
+2. Click the CMORE destination to open its **Configuration** tab. It has the
+   destination's name and URL at the top, then an **Auth** section and a
+   **Deliver** section.
 
-   <!-- SHOT: gundi-02-destination-configuration — page: .../destinations/b80e6781-40c3-4887-9d31-3ad0fb628423/configuration, state: configuration tab showing Authenticate + Deliver sections, crop: full page -->
    ![The CMORE destination's Configuration tab](images/gundi-02-destination-configuration.png)
 
-### 2.2 Fill in Authenticate and test it
+### 2.2 Fill in Auth and test it
 
-1. In **Authenticate**, enter the three values from Part 1:
+1. In the **Auth** section, enter the three values from Part 1:
 
    | Field | Value |
    |---|---|
-   | **API Token** | the service's Auth Token (paste the raw value) |
    | **API Base URL** | e.g. `https://cmorewc1.chpc.ac.za/za/WebAPI/api` — note it ends with `/za/WebAPI/api`, not just the host |
-   | **Owner Group ID** | your share group's numeric ID (the service's Target Group ID) |
+   | **API Token** | the service's Auth Token (paste the raw value — the field shows it masked) |
+   | **Owner Group ID** | your share group's numeric ID (the service's Target Group ID, e.g. `8334`) |
 
-   <!-- SHOT: gundi-03-authenticate-form — page: destination configuration, state: Authenticate section filled, token masked, crop: full page -->
-   ![The Authenticate form](images/gundi-03-authenticate-form.png)
+   ![The Auth section, filled in](images/gundi-03-authenticate-form.png)
 
-2. Save, then **run the Authenticate action** from the portal. This checks
-   the token against your CMORE server before any data flows — it catches a
-   bad token, wrong URL, or a share group with no visible tags immediately.
+2. Save, then click **Test Connection** (top right of the Auth section).
+   This checks the token against your CMORE server before any data flows —
+   it catches a bad token or wrong URL immediately. You want the green
+   **Valid Credentials** result:
 
-   <!-- SHOT: gundi-04-authenticate-run — page: destination configuration, state: Authenticate action executed with success result visible, crop: full page -->
-   ![A successful Authenticate test](images/gundi-04-authenticate-run.png)
+   ![Test Connection returning Valid Credentials](images/gundi-04-authenticate-run.png)
 
 ### 2.3 Map the event type to a CMORE tag
 
@@ -211,28 +212,34 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
    display name).
 2. **CMORE Tag Name**: `Rhino Carcass` — exactly as the tag is spelled in
    CMORE's tag chooser.
-3. **Field Mappings** — one row per detail you want carried over. For Rhino
-   Carcass we map three:
+3. **Field Mappings** — one row per detail you want carried over. Our test
+   system maps six:
 
    | Gundi event_details key (from ER) | CMORE field name |
    |---|---|
    | `animal_sex` | `Animal Sex` |
    | `age_of_animal` | `Animal Age` |
+   | `age_of_carcass` | `Carcass Age` |
+   | `cause_of_death` | `Kill Type` |
+   | `animal_id` | `Skull Tag Number` |
    | `animal_common_name` | `Rhino Spesies` |
 
    (Yes, "Rhino Spesies" — use CMORE's spelling exactly as it appears in the
    tag.)
 
+   ![The rhino_carcass → Rhino Carcass mapping in the Deliver config](images/gundi-05-deliver-mapping.png)
+
 4. **Value Mappings** — only needed when EarthRanger's stored value and
    CMORE's option don't obviously match. Matching ignores case and
-   punctuation, so ER `male` finds CMORE `Male` on its own. But an ER choice
-   like `b_3_months1_year` needs an explicit row mapping it to CMORE's
-   `Calf`. Any value that can't be matched is dropped from the tag (and
-   logged) rather than sent as garbage — so unmapped values never break
-   delivery, they just leave that one field empty.
+   punctuation, so ER `male` finds CMORE `Male` on its own. But EarthRanger's
+   age classes don't look anything like CMORE's, so `Animal Age` gets
+   explicit rows: `a_0-3_months` → `Calf`, `b_3_months1_year` → `Sub-Adult`,
+   `d_2-3.5years` → `Adult`, and so on. Likewise `Black Rhino` → `Black` for
+   the species field. Any value that can't be matched is dropped from the
+   tag (and logged) rather than sent as garbage — unmapped values never
+   break delivery, they just leave that one field empty.
 
-   <!-- SHOT: gundi-05-deliver-mapping — page: destination configuration, state: Deliver section with the rhino_carcass → Rhino Carcass entry expanded showing field mappings, crop: full page -->
-   ![The rhino_carcass → Rhino Carcass mapping in the Deliver config](images/gundi-05-deliver-mapping.png)
+   ![Value Mappings translating ER's carcass-age values into CMORE's options](images/gundi-06-value-mappings.png)
 
 5. Save the configuration.
 
@@ -246,18 +253,18 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
 The EarthRanger side of the connection controls *which* events leave
 EarthRanger and *how often* Gundi checks for new ones.
 
-1. In the Gundi portal, open the connection's **EarthRanger source** and its
-   configuration. Confirm the site URL and credentials are set (this is
-   usually done once, when the connection is first created).
-2. In the pull/fetch settings, make sure the **event types to share** include
-   `rhino_carcass` — or are left open so all event types flow. This filter is
-   the reason an event type can work in ER yet never reach CMORE.
+1. On the connection page, open the **Provider** tab. It holds the
+   EarthRanger side: the ER **Auth** token (with its own **Test Connection**
+   button) and a **Pull Events** section. The credentials are usually set
+   once, when the connection is first created.
+2. In **Pull Events**, make sure **Event Types** includes `rhino_carcass` —
+   or is left empty so all event types flow. This filter is the reason an
+   event type can work in ER yet never reach CMORE.
+3. Confirm the **Run On Schedule** toggle is on — that's what makes Gundi
+   poll EarthRanger automatically (typically every few minutes; new events
+   appear in CMORE after the next run).
 
-   <!-- SHOT: gundi-06-er-event-filter — page: connection's ER source configuration, state: action config showing event type filter / poll settings, crop: full page -->
-   ![The EarthRanger source's event filter and schedule](images/gundi-06-er-event-filter.png)
-
-3. Note the polling schedule — it sets how long Part 4's test takes to show
-   up (typically a few minutes).
+   ![Pull Events: the event-type filter and Run On Schedule toggle](images/gundi-07-er-event-filter.png)
 
 ## Part 4: See it work
 
@@ -266,9 +273,10 @@ Time to prove the pipeline end-to-end.
 1. In EarthRanger, click on the map where the (test) carcass was found and
    choose **Report** → **Rhino Carcass**, or start a new report from the
    reports panel.
-2. Fill in the fields you mapped in Part 2.3 — for the test: **Animal Sex**,
-   **Age of Animal**, and **Animal Common Name** — plus notes that make it
-   obviously a test, and save.
+2. Fill in the fields you mapped in Part 2.3 — for the test at least
+   **Animal Sex**, **Age of Animal**, and **Animal Common Name**, so you can
+   see both an automatic match and a value mapping at work — plus notes that
+   make it obviously a test, and save.
 
    <!-- SHOT: er-01-report-form — page: ER site, state: Rhino Carcass report form filled with test values, crop: full page -->
    ![Reporting a Rhino Carcass event in EarthRanger](images/er-01-report-form.png)
@@ -302,7 +310,7 @@ report is shared automatically. To share more event types, repeat Part 2.3
 | Event arrives in CMORE but **without the tag** | Tag name misspelled in the mapping, or your share group can't see the tag's domain | [Events post, but the structured tag is missing](troubleshooting.md#events-post-but-the-structured-tag-is-missing) |
 | Tag is there but **one field is empty** | That value needs a Value Mapping (Part 2.3, step 4) | [A specific lookup value is dropped](troubleshooting.md#a-specific-lookup-value-is-dropped) |
 | **Nothing arrives** in CMORE at all | Event type not in the ER share filter, or routing/credentials problem | [Nothing reaches the runner at all](troubleshooting.md#nothing-reaches-the-runner-at-all) |
-| **Authenticate test fails** | Wrong token, wrong base URL (must end in `/za/WebAPI/api`), or service not Active / not linked to your group (Part 1.3) | re-run Part 1.2–1.3, then the Authenticate action |
+| **Test Connection fails** | Wrong token, wrong base URL (must end in `/za/WebAPI/api`), or service not Active / not linked to your group (Part 1.3) | re-run Part 1.2–1.3, then Test Connection again |
 | **No link back to EarthRanger** on the event | Deep-link comment issue | [The source deep link doesn't appear in CMORE](troubleshooting.md#the-source-deep-link-doesnt-appear-in-cmore) |
 
 For anything deeper, the Gundi portal's activity log on the connection shows
