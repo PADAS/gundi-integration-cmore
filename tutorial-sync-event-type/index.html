@@ -1,0 +1,1020 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="What the CMORE destination action runner does and how to configure it.">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Tutorial — Sync an Event Type - Gundi CMORE Action Runner</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sync-an-earthranger-event-type-to-cmore" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Gundi CMORE Action Runner" class="md-header__button md-logo" aria-label="Gundi CMORE Action Runner" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Gundi CMORE Action Runner
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Tutorial — Sync an Event Type
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="green"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/PADAS/gundi-integration-cmore" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PADAS/gundi-integration-cmore
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Gundi CMORE Action Runner" class="md-nav__button md-logo" aria-label="Gundi CMORE Action Runner" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Gundi CMORE Action Runner
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PADAS/gundi-integration-cmore" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PADAS/gundi-integration-cmore
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial — Sync an Event Type
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial — Sync an Event Type
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-youre-building" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you're building
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-set-up-the-cmore-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 1: Set up the CMORE side
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 1: Set up the CMORE side">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-open-the-cmore-admin-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Open the Cmore Admin Site
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-create-the-service-and-get-its-api-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Create the service and get its API token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-link-the-service-to-your-share-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Link the service to your share group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-confirm-you-can-see-the-tags-you-need" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4 Confirm you can see the tags you need
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2-configure-the-gundi-destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 2: Configure the Gundi destination
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 2: Configure the Gundi destination">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-open-your-connections-cmore-destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Open your connection's CMORE destination
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-fill-in-auth-and-test-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Fill in Auth and test it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-map-the-event-type-to-a-cmore-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Map the event type to a CMORE tag
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-3-connect-earthranger-and-choose-what-to-share" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 3: Connect EarthRanger and choose what to share
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-4-see-it-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 4: See it work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-something-doesnt-look-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If something doesn't look right
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sync-an-earthranger-event-type-to-cmore">Sync an EarthRanger event type to CMORE<a class="headerlink" href="#sync-an-earthranger-event-type-to-cmore" title="Permanent link">&para;</a></h1>
+<p>This tutorial walks you through connecting EarthRanger to CMORE so that when a
+ranger reports an event in EarthRanger, it appears in CMORE — on the map, in
+the message feed, and classified with a CMORE tag — within minutes, with no
+re-typing.</p>
+<p>We use one concrete example the whole way: the <strong>Rhino Carcass</strong> event type.
+By the end you will have reported a rhino carcass in EarthRanger and watched
+it arrive in CMORE looking like this:</p>
+<p><img alt="A delivered Rhino Carcass event in CMORE, with tag fields populated and a link back to EarthRanger" src="../images/cmore-03-event-detail.png" /></p>
+<p>Everything in this guide is point-and-click in three web portals. You do not
+need to write code or call APIs.</p>
+<p><a href="../">← Overview</a></p>
+<hr />
+<h2 id="what-youre-building">What you're building<a class="headerlink" href="#what-youre-building" title="Permanent link">&para;</a></h2>
+<p>Three systems cooperate, and each is configured in its own portal:</p>
+<div class="highlight"><pre><span></span><code>EarthRanger  ──►  Gundi  ──►  CMORE
+(rangers          (routes and     (your partners see the
+ report events)    translates)     event, tagged, on their map)
+</code></pre></div>
+<ul>
+<li><strong>EarthRanger</strong> is where events are reported.</li>
+<li><strong>Gundi</strong> (gundiservice.org) is the data-sharing platform that polls
+  EarthRanger for new events, translates them into CMORE's format, and
+  delivers them.</li>
+<li><strong>CMORE</strong> is where the events land, in your organisation's <strong>share group</strong>,
+  classified with a CMORE <strong>tag</strong>.</li>
+</ul>
+<p>You configure each piece once. After that the pipeline runs by itself.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<p>You need working logins for all three systems:</p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>You need</th>
+<th>Example used here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EarthRanger</td>
+<td>A site login that can report events</td>
+<td><code>gundi-dev.staging.pamdas.org</code></td>
+</tr>
+<tr>
+<td>Gundi portal</td>
+<td>An account in your organisation</td>
+<td><code>gundiservice.org</code></td>
+</tr>
+<tr>
+<td>CMORE</td>
+<td>A user in your organisation's share group</td>
+<td><code>cmorewc1.chpc.ac.za</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Ask your CMORE administrator (CSIR) for these — they are not self-service:</strong></p>
+<ol>
+<li><strong>An organisation (share group) on the CMORE instance</strong>, with your CMORE
+   user in it. Organisations and share groups are created by the CMORE team.</li>
+<li><strong>Access to the tag domain you need.</strong> Tags live in <em>tag domains</em> (for
+   example, the <strong>Wildlife</strong> domain contains Rhino Carcass, Poacher
+   Sighting, Wounded Rhino and 14 more). Your share group can only use tags
+   from domains it has been granted. Domains you don't have simply don't
+   appear anywhere in your screens, and some — including Wildlife, which is
+   marked as Stop Rhino Poaching intellectual property — are restricted and
+   granted case-by-case. Tell the CMORE team <strong>which tags you want to use
+   and which share group needs them</strong>.</li>
+</ol>
+<p>Everything else in this guide — creating the service, getting the API key,
+finding your share group ID, mapping fields — you can do yourself.</p>
+</blockquote>
+<h2 id="part-1-set-up-the-cmore-side">Part 1: Set up the CMORE side<a class="headerlink" href="#part-1-set-up-the-cmore-side" title="Permanent link">&para;</a></h2>
+<p>In this part you create a <strong>service</strong> in CMORE (an identity for the
+integration), get its <strong>API token</strong>, and note your <strong>share group ID</strong>. You'll
+paste these three things into Gundi in Part 2.</p>
+<p>CMORE has two web interfaces, and this part uses both:</p>
+<ul>
+<li>the <strong>Web Portal</strong> (the map view you normally use), and</li>
+<li>the <strong>Cmore Admin Site</strong>, opened from the portal via the <strong>gears icon</strong> in
+  the top-right toolbar (hover text "Manage Users"). It opens in a new tab.</li>
+</ul>
+<h3 id="11-open-the-cmore-admin-site">1.1 Open the Cmore Admin Site<a class="headerlink" href="#11-open-the-cmore-admin-site" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Sign in to the CMORE Web Portal.</li>
+</ol>
+<p><img alt="CMORE sign-in page" src="../images/cmore-01-login.png" /></p>
+<ol>
+<li>Click the <strong>gears icon</strong> in the top-right toolbar. A new tab opens with
+   the <strong>Cmore Admin Site</strong>. The left menu has <strong>Manage Users</strong>, <strong>Manage Tag
+   Shortcuts</strong>, <strong>Manage Tags</strong>, <strong>Service</strong>, and <strong>Log</strong>.</li>
+</ol>
+<p><img alt="The Cmore Admin Site, Manage Users page" src="../images/cmore-07-admin-manage-users.png" /></p>
+<h3 id="12-create-the-service-and-get-its-api-token">1.2 Create the service and get its API token<a class="headerlink" href="#12-create-the-service-and-get-its-api-token" title="Permanent link">&para;</a></h3>
+<ol>
+<li>In the left menu, click <strong>Service</strong>. You'll see the <strong>External Services</strong>
+   list — every integration identity your organisation has.</li>
+</ol>
+<p><img alt="External Services list" src="../images/cmore-08-external-services.png" /></p>
+<ol>
+<li>Click <strong>Create New Service</strong>. Enter a <strong>Unique Id</strong> (short, no spaces —
+   e.g. <code>earthranger-prod</code>) and a <strong>Display Name</strong> (e.g. <code>EarthRanger</code>), then
+   click <strong>Create</strong>.</li>
+</ol>
+<p><img alt="Create a new System Service form" src="../images/cmore-12-create-service.png" /></p>
+<ol>
+<li>Back in the list, click <strong>View</strong> on your new service. The service page
+   shows an <strong>API Key</strong> section with the <strong>Auth Token</strong> — this is the token
+   Gundi will use. Copy it somewhere safe.</li>
+</ol>
+<p><img alt="Service detail page with the Auth Token (redacted here) and the Target Group" src="../images/cmore-09-service-detail.png" /></p>
+<blockquote>
+<p>If the token is ever exposed, come back here and click
+<strong>GenerateNewToken</strong> — it invalidates the old token immediately.
+Remember to paste the new one into Gundi (Part 2.2).</p>
+</blockquote>
+<h3 id="13-link-the-service-to-your-share-group">1.3 Link the service to your share group<a class="headerlink" href="#13-link-the-service-to-your-share-group" title="Permanent link">&para;</a></h3>
+<p>The token only works when the service points at your share group.</p>
+<ol>
+<li>On the service page click <strong>Edit</strong>.</li>
+<li>Set <strong>Target Group ID</strong> to your share group's numeric ID and set
+   <strong>State</strong> to <strong>Active</strong>, then <strong>Save</strong>.</li>
+</ol>
+<p><img alt="Service edit page: Target Group ID and State" src="../images/cmore-13-service-edit.png" /></p>
+<p><strong>Where do I find my share group ID?</strong> If your organisation already has a
+   working service, its <strong>Target Group</strong> section shows it (e.g. <code>ShareGroup —
+   ID 8334 — Earth Ranger Integration</code>). If not, ask the CMORE team for your
+   share group's ID when they create it — the web portal shows your group's
+   <em>name</em> (top toolbar and profile) but not its number.</p>
+<ol>
+<li>Note down the <strong>Target Group ID</strong> — Gundi calls it the <strong>Owner Group ID</strong>
+   and you'll enter it again in Part 2.2.</li>
+</ol>
+<h3 id="14-confirm-you-can-see-the-tags-you-need">1.4 Confirm you can see the tags you need<a class="headerlink" href="#14-confirm-you-can-see-the-tags-you-need" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Still in the Admin Site, click <strong>Manage Tags</strong>. Domains granted to your
+   organisation are listed — here, <strong>Wildlife</strong> with its 17 tags.</li>
+</ol>
+<p><img alt="Manage Tags: the Wildlife domain" src="../images/cmore-10-tag-domains.png" /></p>
+<ol>
+<li>Click the domain name to see its tags and which share groups are assigned.
+   Confirm your share group appears under <strong>Assigned ShareGroups</strong>.</li>
+</ol>
+<p><img alt="Wildlife domain: tags and assigned share groups" src="../images/cmore-11-wildlife-domain-access.png" /></p>
+<ol>
+<li>Cross-check in the Web Portal: click <strong>New Event</strong> on the messages tile.
+   The "Choose a tag" screen must show the tags your events will use (e.g.
+   <strong>Rhino Carcass</strong> under <strong>Wildlife</strong>). If a tag is missing here, it will
+   be silently dropped from delivered events — go back to the prerequisites
+   box and contact the CMORE team.</li>
+</ol>
+<p><img alt="New Event: Choose a tag, grouped by domain" src="../images/cmore-14-new-event-choose-tag.png" /></p>
+<p>You now have the three values Part 2 needs: the <strong>API token</strong>, the <strong>API base
+URL</strong> (your CMORE server + <code>/za/WebAPI/api</code>, e.g.
+<code>https://cmorewc1.chpc.ac.za/za/WebAPI/api</code>), and the <strong>Owner Group ID</strong>.</p>
+<h2 id="part-2-configure-the-gundi-destination">Part 2: Configure the Gundi destination<a class="headerlink" href="#part-2-configure-the-gundi-destination" title="Permanent link">&para;</a></h2>
+<p>In this part you point Gundi at CMORE: enter the credentials, test them, and
+tell Gundi how to translate the Rhino Carcass event type into the CMORE
+Rhino Carcass tag.</p>
+<h3 id="21-open-your-connections-cmore-destination">2.1 Open your connection's CMORE destination<a class="headerlink" href="#21-open-your-connections-cmore-destination" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Sign in to the Gundi portal and open <strong>Connections</strong>, then your
+   connection. A connection links a <em>source</em> (your EarthRanger site) to one
+   or more <em>destinations</em> (CMORE). Its page has five tabs: <strong>General</strong>,
+   <strong>Provider</strong>, <strong>Destinations</strong>, <strong>Sources</strong>, and <strong>Logs</strong>. Open the
+   <strong>Destinations</strong> tab — your CMORE destination is listed there.</li>
+</ol>
+<p><img alt="The connection's Destinations tab with the CMORE destination" src="../images/gundi-01-connection-view.png" /></p>
+<ol>
+<li>Click the CMORE destination to open its <strong>Configuration</strong> tab. It has the
+   destination's name and URL at the top, then an <strong>Auth</strong> section and a
+   <strong>Deliver</strong> section.</li>
+</ol>
+<p><img alt="The CMORE destination's Configuration tab" src="../images/gundi-02-destination-configuration.png" /></p>
+<h3 id="22-fill-in-auth-and-test-it">2.2 Fill in Auth and test it<a class="headerlink" href="#22-fill-in-auth-and-test-it" title="Permanent link">&para;</a></h3>
+<ol>
+<li>In the <strong>Auth</strong> section, enter the three values from Part 1:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>API Base URL</strong></td>
+<td>e.g. <code>https://cmorewc1.chpc.ac.za/za/WebAPI/api</code> — note it ends with <code>/za/WebAPI/api</code>, not just the host</td>
+</tr>
+<tr>
+<td><strong>API Token</strong></td>
+<td>the service's Auth Token (paste the raw value — the field shows it masked)</td>
+</tr>
+<tr>
+<td><strong>Owner Group ID</strong></td>
+<td>your share group's numeric ID (the service's Target Group ID, e.g. <code>8334</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="The Auth section, filled in" src="../images/gundi-03-authenticate-form.png" /></p>
+<ol>
+<li>Save, then click <strong>Test Connection</strong> (top right of the Auth section).
+   This checks the token against your CMORE server before any data flows —
+   it catches a bad token or wrong URL immediately. You want the green
+   <strong>Valid Credentials</strong> result:</li>
+</ol>
+<p><img alt="Test Connection returning Valid Credentials" src="../images/gundi-04-authenticate-run.png" /></p>
+<h3 id="23-map-the-event-type-to-a-cmore-tag">2.3 Map the event type to a CMORE tag<a class="headerlink" href="#23-map-the-event-type-to-a-cmore-tag" title="Permanent link">&para;</a></h3>
+<p>Without a mapping, events still arrive in CMORE — description, location, and
+a link back to EarthRanger — but <em>unclassified</em>. The mapping is what fills in
+the structured tag fields.</p>
+<p>In <strong>Deliver</strong>, add an entry to <strong>Event type → CMORE tag</strong>:</p>
+<ol>
+<li><strong>Gundi event_type</strong>: <code>rhino_carcass</code> — the EarthRanger event type's
+   internal name (ask your EarthRanger admin, or check the event type's
+   value in the ER admin — it's the lowercase name with underscores, not the
+   display name).</li>
+<li><strong>CMORE Tag Name</strong>: <code>Rhino Carcass</code> — exactly as the tag is spelled in
+   CMORE's tag chooser.</li>
+<li><strong>Field Mappings</strong> — one row per detail you want carried over. Our test
+   system maps six:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Gundi event_details key (from ER)</th>
+<th>CMORE field name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>animal_sex</code></td>
+<td><code>Animal Sex</code></td>
+</tr>
+<tr>
+<td><code>age_of_animal</code></td>
+<td><code>Animal Age</code></td>
+</tr>
+<tr>
+<td><code>age_of_carcass</code></td>
+<td><code>Carcass Age</code></td>
+</tr>
+<tr>
+<td><code>cause_of_death</code></td>
+<td><code>Kill Type</code></td>
+</tr>
+<tr>
+<td><code>animal_id</code></td>
+<td><code>Skull Tag Number</code></td>
+</tr>
+<tr>
+<td><code>animal_common_name</code></td>
+<td><code>Rhino Spesies</code></td>
+</tr>
+</tbody>
+</table>
+<p>(Yes, "Rhino Spesies" — use CMORE's spelling exactly as it appears in the
+   tag.)</p>
+<p><img alt="The rhino_carcass → Rhino Carcass mapping in the Deliver config" src="../images/gundi-05-deliver-mapping.png" /></p>
+<ol>
+<li><strong>Value Mappings</strong> — only needed when EarthRanger's stored value and
+   CMORE's option don't obviously match. Matching ignores case and
+   punctuation, so ER <code>male</code> finds CMORE <code>Male</code> on its own. But EarthRanger's
+   age classes don't look anything like CMORE's, so <code>Animal Age</code> gets
+   explicit rows: <code>a_0-3_months</code> → <code>Calf</code>, <code>b_3_months1_year</code> → <code>Sub-Adult</code>,
+   <code>d_2-3.5years</code> → <code>Adult</code>, and so on. Likewise <code>Black Rhino</code> → <code>Black</code> for
+   the species field. Any value that can't be matched is dropped from the
+   tag (and logged) rather than sent as garbage — unmapped values never
+   break delivery, they just leave that one field empty.</li>
+</ol>
+<p><img alt="Value Mappings translating ER's carcass-age values into CMORE's options" src="../images/gundi-06-value-mappings.png" /></p>
+<ol>
+<li>Save the configuration.</li>
+</ol>
+<blockquote>
+<p><strong>Shortcut for many fields:</strong> authoring mappings by hand gets tedious for
+tag-heavy event types (CMORE's Rhino Carcass tag has 26 fields). Your
+integration engineer can generate a mapping automatically with the
+<code>scaffold-mapping</code> tool — see <a href="../configuration/#scaffolding-mappings">Configuration</a>.</p>
+</blockquote>
+<h2 id="part-3-connect-earthranger-and-choose-what-to-share">Part 3: Connect EarthRanger and choose what to share<a class="headerlink" href="#part-3-connect-earthranger-and-choose-what-to-share" title="Permanent link">&para;</a></h2>
+<p>The EarthRanger side of the connection controls <em>which</em> events leave
+EarthRanger and <em>how often</em> Gundi checks for new ones.</p>
+<ol>
+<li>On the connection page, open the <strong>Provider</strong> tab. It holds the
+   EarthRanger side: the ER <strong>Auth</strong> token (with its own <strong>Test Connection</strong>
+   button) and a <strong>Pull Events</strong> section. The credentials are usually set
+   once, when the connection is first created.</li>
+<li>In <strong>Pull Events</strong>, make sure <strong>Event Types</strong> includes <code>rhino_carcass</code> —
+   or is left empty so all event types flow. This filter is the reason an
+   event type can work in ER yet never reach CMORE.</li>
+<li>Confirm the <strong>Run On Schedule</strong> toggle is on — that's what makes Gundi
+   poll EarthRanger automatically (typically every few minutes; new events
+   appear in CMORE after the next run).</li>
+</ol>
+<p><img alt="Pull Events: the event-type filter and Run On Schedule toggle" src="../images/gundi-07-er-event-filter.png" /></p>
+<h2 id="part-4-see-it-work">Part 4: See it work<a class="headerlink" href="#part-4-see-it-work" title="Permanent link">&para;</a></h2>
+<p>Time to prove the pipeline end-to-end.</p>
+<ol>
+<li>In EarthRanger, open <strong>Events</strong> and click the <strong>Create Event</strong> button (or
+   use the <strong>+</strong> button on the map). In the <strong>Add Event</strong> dialog, pick
+   <strong>Rhino Carcass</strong> (under its category, e.g. <em>Monitoring</em>).</li>
+<li>Fill in the fields you mapped in Part 2.3 — for the test at least
+   <strong>Animal Sex</strong>, <strong>Age of Animal</strong>, and <strong>Animal Common Name</strong>, so you can
+   see both an automatic match and a value mapping at work — plus notes that
+   make it obviously a test, and save.</li>
+</ol>
+<p><img alt="Reporting a Rhino Carcass event in EarthRanger" src="../images/er-01-report-form.png" /></p>
+<p><img alt="The saved event in EarthRanger" src="../images/er-02-saved-event.png" /></p>
+<ol>
+<li>Wait one polling interval (Part 3, step 3), then open the CMORE Web
+   Portal. Your event appears at the top of the message feed, titled with the
+   event's EarthRanger title.</li>
+<li>Click it. The Event Detail window shows:</li>
+<li>the <strong>description and location</strong> from EarthRanger,</li>
+<li>the <strong>Rhino Carcass tag</strong> with the mapped fields filled in,</li>
+<li>a <strong>comment with a link back to the EarthRanger event</strong>, so anyone in
+     CMORE can click through to the source, and</li>
+<li>source <strong>Generated</strong>, meaning it was posted by the integration, not
+     typed by a person.</li>
+</ol>
+<p><img alt="The test event delivered to CMORE" src="../images/cmore-15-delivered-event.png" /></p>
+<p>In our test run, "White Rhino / Sub-adult / Female" from EarthRanger
+   arrived as "White / Sub-Adult / Female" in CMORE — the value mappings and
+   automatic matching from Part 2.3, working exactly as configured.</p>
+<p>That's the whole loop. From here on, every <code>rhino_carcass</code> event your rangers
+report is shared automatically. To share more event types, repeat Part 2.3
+(one mapping entry per event type) — and check the tag's domain is granted
+(Part 1.4).</p>
+<h2 id="if-something-doesnt-look-right">If something doesn't look right<a class="headerlink" href="#if-something-doesnt-look-right" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Most likely cause</th>
+<th>Where to look</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Event arrives in CMORE but <strong>without the tag</strong></td>
+<td>Tag name misspelled in the mapping, or your share group can't see the tag's domain</td>
+<td><a href="../troubleshooting/#events-post-but-the-structured-tag-is-missing">Events post, but the structured tag is missing</a></td>
+</tr>
+<tr>
+<td>Tag is there but <strong>one field is empty</strong></td>
+<td>That value needs a Value Mapping (Part 2.3, step 4)</td>
+<td><a href="../troubleshooting/#a-specific-lookup-value-is-dropped">A specific lookup value is dropped</a></td>
+</tr>
+<tr>
+<td><strong>Nothing arrives</strong> in CMORE at all</td>
+<td>Event type not in the ER share filter, or routing/credentials problem</td>
+<td><a href="../troubleshooting/#nothing-reaches-the-runner-at-all">Nothing reaches the runner at all</a></td>
+</tr>
+<tr>
+<td><strong>Test Connection fails</strong></td>
+<td>Wrong token, wrong base URL (must end in <code>/za/WebAPI/api</code>), or service not Active / not linked to your group (Part 1.3)</td>
+<td>re-run Part 1.2–1.3, then Test Connection again</td>
+</tr>
+<tr>
+<td><strong>No link back to EarthRanger</strong> on the event</td>
+<td>Deep-link comment issue</td>
+<td><a href="../troubleshooting/#the-source-deep-link-doesnt-appear-in-cmore">The source deep link doesn't appear in CMORE</a></td>
+</tr>
+</tbody>
+</table>
+<p>For anything deeper, the Gundi portal's activity log on the connection shows
+what was delivered, skipped, or errored — and the
+<a href="../troubleshooting/">Troubleshooting</a> page covers each case in detail.</p>
+<p><a href="../">← Overview</a></p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.top", "content.code.copy", "toc.integrate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
