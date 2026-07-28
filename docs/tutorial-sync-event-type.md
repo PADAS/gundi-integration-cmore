@@ -278,10 +278,8 @@ Time to prove the pipeline end-to-end.
    see both an automatic match and a value mapping at work — plus notes that
    make it obviously a test, and save.
 
-   <!-- SHOT: er-01-report-form — page: ER site, state: Rhino Carcass report form filled with test values, crop: full page -->
    ![Reporting a Rhino Carcass event in EarthRanger](images/er-01-report-form.png)
 
-   <!-- SHOT: er-02-saved-event — page: ER site, state: the saved test event open, serial visible, crop: full page -->
    ![The saved event in EarthRanger](images/er-02-saved-event.png)
 
 3. Wait one polling interval (Part 3, step 3), then open the CMORE Web
@@ -295,8 +293,11 @@ Time to prove the pipeline end-to-end.
    - source **Generated**, meaning it was posted by the integration, not
      typed by a person.
 
-   <!-- SHOT: cmore-15-delivered-event — page: CMORE portal, state: the newly delivered test event's detail window, tag fields + deep link visible, crop: full page -->
    ![The test event delivered to CMORE](images/cmore-15-delivered-event.png)
+
+   In our test run, "White Rhino / Sub-adult / Female" from EarthRanger
+   arrived as "White / Sub-Adult / Female" in CMORE — the value mappings and
+   automatic matching from Part 2.3, working exactly as configured.
 
 That's the whole loop. From here on, every `rhino_carcass` event your rangers
 report is shared automatically. To share more event types, repeat Part 2.3
