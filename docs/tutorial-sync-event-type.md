@@ -270,9 +270,9 @@ EarthRanger and *how often* Gundi checks for new ones.
 
 Time to prove the pipeline end-to-end.
 
-1. In EarthRanger, click on the map where the (test) carcass was found and
-   choose **Report** → **Rhino Carcass**, or start a new report from the
-   reports panel.
+1. In EarthRanger, open **Events** and click the **Create Event** button (or
+   use the **+** button on the map). In the **Add Event** dialog, pick
+   **Rhino Carcass** (under its category, e.g. *Monitoring*).
 2. Fill in the fields you mapped in Part 2.3 — for the test at least
    **Animal Sex**, **Age of Animal**, and **Animal Common Name**, so you can
    see both an automatic match and a value mapping at work — plus notes that

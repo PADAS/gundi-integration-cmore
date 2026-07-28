@@ -133,6 +133,6 @@
 - Modify: `docs/tutorial-sync-event-type.md`, `docs/slides/cmore-er-sync.md` (fixes only)
 
 - [ ] **Step 1: Link/image audit** — every `![](images/…)` target exists (`grep -o 'images/[^)]*' docs/tutorial-sync-event-type.md | while read f; do test -f "docs/$f" || echo "MISSING $f"; done`); no leftover `<!-- SHOT` comments; `index.md` link resolves; troubleshooting anchors exist.
-- [ ] **Step 2: Credential sweep** — `grep -riE 'vhxwr|Fork table|Handle8im|password' docs/` returns nothing; re-inspect any screenshot showing a form with a token field.
+- [ ] **Step 2: Credential sweep** — grep docs/ for every operator-supplied password/token fragment used this session (patterns supplied in-session, never written to this file); expect zero hits. Re-inspect any screenshot showing a form with a token field.
 - [ ] **Step 3: Field-admin read-through** — read the tutorial start to finish as the target reader; every step is one action with an exact label; jargon only where the UI itself uses it. Fix inline.
 - [ ] **Step 4: Commit & wrap up** — `git add -A docs/ && git commit -m "docs: final review fixes for CMORE/ER field tutorial + deck"`. Then summarize deliverables and hand back for user review / PR decision.
