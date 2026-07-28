@@ -59,6 +59,9 @@ credentials + the delivery mappings live in **this integration** (see
 
 ## Next
 
+- [**Tutorial: sync an event type**](tutorial-sync-event-type.md) —
+  step-by-step, with screenshots, for site administrators: CMORE service +
+  API key, Gundi configuration, and a verified end-to-end test.
 - [**Configuration**](configuration.md) — the Authenticate and Deliver
   actions and every setting, plus the scaffold tool that helps author tag
   mappings.
