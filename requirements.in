@@ -1,3 +1,4 @@
 # Add your integration-specific dependencies here
 backoff
 questionary~=2.0  # arrow-key prompts for the scaffold-mapping CLI
+google-cloud-storage
