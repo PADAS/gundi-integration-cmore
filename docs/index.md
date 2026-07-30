@@ -35,6 +35,10 @@ already classified, with its CMORE tag fields populated from the event details.
 A deep link back to the source event is added as a comment so CMORE users can
 click through to the origin system.
 
+- **Attachments** — files attached to ER events (photos, documents) are posted to
+  CMORE as media comments on the mapped event (multipart `POST /comment`).
+  Requires the `BUCKET_NAME` env var and read access to Gundi's attachments bucket.
+
 ## Where it sits in Gundi
 
 ```

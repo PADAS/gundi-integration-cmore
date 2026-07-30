@@ -188,6 +188,7 @@ def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=No
     inner.post_locations = AsyncMock(return_value=post_locations_return or {"status": "ok"})
     inner.post_event = AsyncMock(return_value=post_event_return or {"messageId": 14697})
     inner.post_comment = AsyncMock(return_value=post_comment_return or {"id": 88888})
+    inner.post_comment_with_file = AsyncMock(return_value=post_comment_return or {"id": 88888})
     inner.post_properties = AsyncMock(return_value={"status": "ok"})
     inner.get_gateway_mapping = AsyncMock(return_value=[])
     inner.create_gnodes = AsyncMock(
@@ -757,28 +758,126 @@ def test_extract_message_id_coerces_to_int():
     assert _extract_message_id({"id": 12345}) is None
 
 
+def _patch_attachment_download(mocker, content=b"\xff\xd8jpegbytes"):
+    download = mocker.patch(
+        "app.actions.handlers.download_attachment", return_value=content
+    )
+    return download
+
+
 @pytest.mark.asyncio
-async def test_deliver_drops_attachment(
+async def test_deliver_attachment_posts_file_comment(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    state = _patch_state_manager(mocker)
+    state.get_state = AsyncMock(return_value={"cmore_message_id": 14697})
+    _patch_activity_logger(mocker)
+    download = _patch_attachment_download(mocker)
+
+    related_event_gundi_id = uuid.uuid4()
+    att = Attachment(
+        gundi_id=uuid.uuid4(),
+        related_to=related_event_gundi_id,
+        source_id=uuid.uuid4(),
+        external_source_id="x",
+        file_path="attachments/abc_photo.jpg",
+    )
+    delivery = GundiDelivery(payload=att, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    assert result["attachment_posted"] is True
+    download.assert_called_once_with("attachments/abc_photo.jpg")
+    inner.post_comment_with_file.assert_awaited_once()
+    args, kwargs = inner.post_comment_with_file.await_args
+    comment = args[0]
+    assert comment.rootMessageId == 14697
+    assert kwargs["filename"] == "abc_photo.jpg"
+    assert kwargs["content"] == b"\xff\xd8jpegbytes"
+    assert kwargs["content_type"] == "image/jpeg"
+    # Looked up the mapping under the PARENT event's gundi_id.
+    state.get_state.assert_awaited_once_with(
+        integration_id=str(integration.id),
+        action_id="deliver",
+        source_id=str(related_event_gundi_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_attachment_raises_when_parent_event_not_delivered(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)  # get_state returns {} → no cmore_message_id
+    _patch_activity_logger(mocker)
+    _patch_attachment_download(mocker)
+
+    att = Attachment(
+        gundi_id=uuid.uuid4(),
+        related_to=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        external_source_id="x",
+        file_path="attachments/abc_photo.jpg",
+    )
+    delivery = GundiDelivery(payload=att, provider=provider_info)
+    # Raising (instead of dropping) makes PubSub redeliver: the parent Event
+    # may simply not have been processed yet (ordering isn't guaranteed).
+    with pytest.raises(ValueError, match="not delivered yet"):
+        await action_deliver(integration, deliver_config, delivery, metadata)
+
+
+@pytest.mark.asyncio
+async def test_deliver_attachment_drops_when_no_related_to(
     mocker, integration, deliver_config, provider_info, metadata
 ):
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
-    activity_log = _patch_activity_logger(mocker)
+    _patch_activity_logger(mocker)
+    _patch_attachment_download(mocker)
 
     att = Attachment(
+        gundi_id=uuid.uuid4(),
         source_id=uuid.uuid4(),
         external_source_id="x",
-        file_path="/tmp/photo.jpg",
+        file_path="attachments/abc_photo.jpg",
     )
     delivery = GundiDelivery(payload=att, provider=provider_info)
     result = await action_deliver(integration, deliver_config, delivery, metadata)
 
-    inner.post_locations.assert_not_awaited()
-    inner.post_event.assert_not_awaited()
-    assert result["dropped"] is True
-    assert result["payload_type"] == "Attachment"
+    assert result == {"dropped": True, "reason": "missing_related_to"}
+    inner.post_comment_with_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_attachment_drops_when_blob_missing(
+    mocker, integration, deliver_config, provider_info, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    state = _patch_state_manager(mocker)
+    state.get_state = AsyncMock(return_value={"cmore_message_id": 14697})
+    _patch_activity_logger(mocker)
+    mocker.patch("app.actions.handlers.download_attachment", return_value=None)
+
+    att = Attachment(
+        gundi_id=uuid.uuid4(),
+        related_to=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        external_source_id="x",
+        file_path="attachments/gone.jpg",
+    )
+    delivery = GundiDelivery(payload=att, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    assert result == {"dropped": True, "reason": "file_not_found"}
+    inner.post_comment_with_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
