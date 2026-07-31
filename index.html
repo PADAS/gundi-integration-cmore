@@ -487,6 +487,11 @@ ID). If a tag mapping is configured for the event's type, the event arrives
 already classified, with its CMORE tag fields populated from the event details.
 A deep link back to the source event is added as a comment so CMORE users can
 click through to the origin system.</p>
+<ul>
+<li><strong>Attachments</strong> — files attached to ER events (photos, documents) are posted to
+  CMORE as media comments on the mapped event (multipart <code>POST /comment</code>).
+  Requires the <code>BUCKET_NAME</code> env var and read access to Gundi's attachments bucket.</li>
+</ul>
 <h2 id="where-it-sits-in-gundi">Where it sits in Gundi<a class="headerlink" href="#where-it-sits-in-gundi" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>EarthRanger ──► EarthRanger action runner ──► Gundi (portal + routing)
                                                    │
