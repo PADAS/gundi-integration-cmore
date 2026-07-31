@@ -1,6 +1,9 @@
+import asyncio
 import hashlib
 import json
 import logging
+import mimetypes
+import os
 import re
 import traceback
 from datetime import datetime
@@ -25,6 +28,8 @@ from app.datasource.schemas import (
 )
 from app.datasource.tag_index import tag_index
 from app.services.activity_logger import activity_logger, log_action_activity
+from app.services.errors import IntegrationDependencyNotReadyError
+from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
 from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig
 
@@ -733,6 +738,88 @@ async def _push_event_update_as_comment(
     return {"comment_posted": True, "cmore_message_id": cmore_message_id, "cmore_response": response}
 
 
+async def _push_attachment_as_comment(
+    integration: Integration,
+    action_config: DeliverConfig,
+    attachment: schemas.v2.Attachment,
+):
+    """Deliver a Gundi Attachment as a CMORE file comment on the parent event.
+
+    ``related_to`` carries the gundi_id of the Event the file belongs to; the
+    CMORE messageId stored at ``_push_event`` time tells us which CMORE event
+    to hang the media comment on. The bytes live in Gundi's attachment bucket
+    under ``file_path``.
+
+    A missing event mapping raises (→ PubSub redelivery with backoff) rather
+    than dropping: message ordering isn't guaranteed, so the attachment often
+    just beat its parent Event through the pipeline. This intentionally
+    differs from the EventUpdate path's warn-and-drop — a retried update is
+    redundant next pull, a dropped photo is gone for good.
+    """
+    related_to = attachment.related_to
+    if not related_to or str(related_to) == "None":
+        logger.warning(
+            "Attachment without related_to; cannot route to a CMORE event. Dropping."
+        )
+        return {"dropped": True, "reason": "missing_related_to"}
+
+    state = await state_manager.get_state(
+        integration_id=str(integration.id),
+        action_id="deliver",
+        source_id=str(related_to),
+    )
+    cmore_message_id = state.get("cmore_message_id") if state else None
+    if not cmore_message_id:
+        # Classified so the activity log shows a labeled, retryable ordering
+        # wait instead of an unclassified failure with a full traceback.
+        raise IntegrationDependencyNotReadyError(
+            f"CMORE event for gundi_id={related_to} not delivered yet; "
+            "attachment will be retried."
+        )
+
+    file_bytes = await asyncio.to_thread(download_attachment, attachment.file_path)
+    if file_bytes is None:
+        await log_action_activity(
+            integration_id=str(integration.id),
+            action_id="deliver",
+            title="Attachment file not found in storage — dropping",
+            level=LogLevel.ERROR,
+            data={"file_path": attachment.file_path, "gundi_id": str(attachment.gundi_id)},
+        )
+        return {"dropped": True, "reason": "file_not_found"}
+
+    filename = os.path.basename(attachment.file_path) or "attachment"
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    auth = _get_auth_config(integration)
+    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+        cmore_comment = CmoreComment(
+            description=f"EarthRanger attachment: {filename}",
+            rootMessageId=int(cmore_message_id),
+            uploadType=UploadType.GENERATED,
+        )
+        response = await client.post_comment_with_file(
+            cmore_comment,
+            filename=filename,
+            content=file_bytes,
+            content_type=content_type,
+        )
+        logger.info(
+            "Posted CMORE file comment (root_message_id=%s, filename=%r, %d bytes): "
+            "cmore_response=%r",
+            cmore_message_id,
+            filename,
+            len(file_bytes),
+            response,
+        )
+
+    return {
+        "attachment_posted": True,
+        "cmore_message_id": cmore_message_id,
+        "cmore_response": response,
+    }
+
+
 @activity_logger()
 async def action_deliver(
     integration: Integration,
@@ -772,7 +859,11 @@ async def action_deliver(
         # the ER runner per logical change; one CMORE comment per EventUpdate.
         return await _push_event_update_as_comment(integration, action_config, payload)
 
-    # Graceful drop for Attachment, TextMessage (no CMORE analogue yet).
+    if isinstance(payload, schemas.v2.Attachment):
+        # ER event photos/files → CMORE media comments on the mapped event.
+        return await _push_attachment_as_comment(integration, action_config, payload)
+
+    # Graceful drop for TextMessage (no CMORE analogue yet).
     payload_type = type(payload).__name__
     await log_action_activity(
         integration_id=str(integration.id),

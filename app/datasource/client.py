@@ -50,7 +50,10 @@ def _safe_json(response: httpx.Response, default):
 
 class CmoreClient:
     def __init__(self, base_url: str, token: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT):
-        headers = {"Content-Type": "application/json"}
+        # No default Content-Type: httpx infers it per request (json= → JSON,
+        # data=+files= → multipart with boundary). A client-level default would
+        # override the multipart boundary header and break file uploads.
+        headers = {}
         if token:
             # Tolerate tokens that already include the "Token " prefix.
             raw = token.strip()
@@ -119,6 +122,31 @@ class CmoreClient:
         """
         payload = json.loads(comment.json(exclude_none=True))
         response = await self._client.post("/comment", json=payload)
+        response.raise_for_status()
+        return _safe_json(response, {})
+
+    @retry_transient
+    async def post_comment_with_file(
+        self,
+        comment: CmoreComment,
+        filename: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> dict:
+        """Attach a file comment (photo/document) to an existing CMORE event.
+
+        CMORE's ``POST /comment`` endpoint accepts a multipart form where the
+        ``file`` part carries the binary and the remaining parts mirror the
+        JSON comment fields. Media comments are how the CMORE UI shows photos
+        attached to an event.
+        """
+        data = {
+            "description": comment.description,
+            "rootMessageId": str(comment.rootMessageId),
+            "uploadType": comment.uploadType.value,
+        }
+        files = {"file": (filename, content, content_type)}
+        response = await self._client.post("/comment", data=data, files=files)
         response.raise_for_status()
         return _safe_json(response, {})
 
