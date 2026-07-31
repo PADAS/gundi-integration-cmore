@@ -826,7 +826,11 @@ async def test_deliver_attachment_raises_when_parent_event_not_delivered(
     delivery = GundiDelivery(payload=att, provider=provider_info)
     # Raising (instead of dropping) makes PubSub redeliver: the parent Event
     # may simply not have been processed yet (ordering isn't guaranteed).
-    with pytest.raises(ValueError, match="not delivered yet"):
+    # Classified as dependency_not_ready so the activity log shows a labeled
+    # retryable wait rather than an unclassified failure.
+    from app.services.errors import IntegrationDependencyNotReadyError
+
+    with pytest.raises(IntegrationDependencyNotReadyError, match="not delivered yet"):
         await action_deliver(integration, deliver_config, delivery, metadata)
 
 

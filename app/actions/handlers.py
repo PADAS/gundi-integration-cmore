@@ -28,6 +28,7 @@ from app.datasource.schemas import (
 )
 from app.datasource.tag_index import tag_index
 from app.services.activity_logger import activity_logger, log_action_activity
+from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
 from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig
@@ -769,7 +770,9 @@ async def _push_attachment_as_comment(
     )
     cmore_message_id = state.get("cmore_message_id") if state else None
     if not cmore_message_id:
-        raise ValueError(
+        # Classified so the activity log shows a labeled, retryable ordering
+        # wait instead of an unclassified failure with a full traceback.
+        raise IntegrationDependencyNotReadyError(
             f"CMORE event for gundi_id={related_to} not delivered yet; "
             "attachment will be retried."
         )

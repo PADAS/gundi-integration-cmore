@@ -64,6 +64,11 @@ class IntegrationBadResponseError(IntegrationError):
     default_title = "Unexpected response from the provider"
 
 
+class IntegrationDependencyNotReadyError(IntegrationError):
+    error_type = "dependency_not_ready"
+    default_title = "Waiting for a related object to be delivered"
+
+
 class ClassifiedError(NamedTuple):
     error_type: str
     title: str
