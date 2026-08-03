@@ -291,6 +291,17 @@ async def execute_action(
         except pydantic.ValidationError as e:
             return await _handle_error(e, integration_id, action_id, data, status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+    # Reference actions are portal-invoked at interactive-fetch frequency (e.g.
+    # every dropdown open), so a handler failure is routine rather than
+    # exceptional (an unknown tag after a rename, a transient 5xx from the
+    # third-party API). Unlike other action types, their errors must not carry
+    # the integration's stored configurations — which include raw auth
+    # secrets (e.g. a bearer token) — into the published IntegrationActionFailed
+    # event or the JSON error response.
+    handler_error_config_data = None if is_reference_action else {
+        "configurations": [c.dict() for c in integration.configurations]
+    }
+
     try:  # Execute the action handler with a timeout
         start_time = time.monotonic()
         handler_kwargs = {
@@ -309,13 +320,13 @@ async def execute_action(
         return await _handle_error(
             asyncio.TimeoutError(f"Action '{action_id}' timed out"),
             integration_id, action_id,
-            config_data={"configurations": [c.dict() for c in integration.configurations]},
+            config_data=handler_error_config_data,
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             classify_heuristics=True,
         )
     except Exception as e:
         return await _handle_error(e, integration_id, action_id,
-                                   config_data={"configurations": [c.dict() for c in integration.configurations]},
+                                   config_data=handler_error_config_data,
                                    classify_heuristics=True)
 
     # Success. Log the execution time and return the result
