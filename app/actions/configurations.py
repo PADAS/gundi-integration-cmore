@@ -49,6 +49,15 @@ class ListFieldOptionsQuery(ReferenceActionConfiguration):
     field_name: str
 
 
+class ListClassificationValuesQuery(ReferenceActionConfiguration):
+    """Query for action_list_classification_values. Each level narrows the
+    CMORE classification tree; the action returns the next level's values."""
+
+    battleDimension: Optional[str] = None
+    force: Optional[str] = None
+    type: Optional[str] = None
+
+
 # NOTE: Dict[str, NestedModel] would be the natural Pydantic shape for the
 # mappings below, but the Gundi portal's form renderer mis-handles
 # `additionalProperties` with object values and displays "[object Object]"

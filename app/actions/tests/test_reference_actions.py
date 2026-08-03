@@ -176,3 +176,63 @@ async def test_list_field_options_unknown_field_raises(integration, mock_cmore_c
             integration,
             ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="No Such Field"),
         )
+
+
+CLASSIFICATION_TREE = [
+    {
+        "battleDimension": "AIR",
+        "forces": [
+            {
+                "force": "CIVIL",
+                "types": [
+                    {"type": "FIXED_WING", "roles": ["UNKNOWN", "LIGHT", "MICROLIGHT"]},
+                ],
+            },
+        ],
+    },
+    {
+        "battleDimension": "LAND",
+        "forces": [
+            {"force": "ANIMAL", "types": [{"type": "DOG", "roles": ["K9"]}]},
+        ],
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_list_classification_values_cascades(integration, mock_cmore_client):
+    from app.actions.configurations import ListClassificationValuesQuery
+    from app.actions.handlers import action_list_classification_values
+
+    mock_cmore_client.get_classification_tree = AsyncMock(
+        return_value=CLASSIFICATION_TREE
+    )
+
+    async def values(**kwargs):
+        result = await action_list_classification_values(
+            integration, ListClassificationValuesQuery(**kwargs)
+        )
+        return [o["value"] for o in result["options"]]
+
+    assert await values() == ["AIR", "LAND"]
+    assert await values(battleDimension="AIR") == ["CIVIL"]
+    assert await values(battleDimension="AIR", force="CIVIL") == ["FIXED_WING"]
+    assert await values(battleDimension="AIR", force="CIVIL", type="FIXED_WING") == [
+        "UNKNOWN", "LIGHT", "MICROLIGHT",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_classification_values_unknown_branch_raises(
+    integration, mock_cmore_client
+):
+    from app.actions.configurations import ListClassificationValuesQuery
+    from app.actions.handlers import action_list_classification_values
+
+    mock_cmore_client.get_classification_tree = AsyncMock(
+        return_value=CLASSIFICATION_TREE
+    )
+    with pytest.raises(ValueError, match="SEA"):
+        await action_list_classification_values(
+            integration, ListClassificationValuesQuery(battleDimension="SEA")
+        )

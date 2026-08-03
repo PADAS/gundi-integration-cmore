@@ -31,7 +31,7 @@ from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .core import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -147,6 +147,48 @@ async def action_list_field_options(
         if lookup.get("value")
     ]
     return ReferenceDataResponse(options=options).dict()
+
+
+def _classification_options(tree: list, query) -> list:
+    """Walk the classification tree one level past the deepest set param."""
+    if not query.battleDimension:
+        return [n["battleDimension"] for n in tree if n.get("battleDimension")]
+    node = next(
+        (n for n in tree if n.get("battleDimension") == query.battleDimension), None
+    )
+    if node is None:
+        raise ValueError(f"Unknown battleDimension {query.battleDimension!r}.")
+    forces = node.get("forces") or []
+    if not query.force:
+        return [f["force"] for f in forces if f.get("force")]
+    force_node = next((f for f in forces if f.get("force") == query.force), None)
+    if force_node is None:
+        raise ValueError(
+            f"Unknown force {query.force!r} under battleDimension "
+            f"{query.battleDimension!r}."
+        )
+    types = force_node.get("types") or []
+    if not query.type:
+        return [t["type"] for t in types if t.get("type")]
+    type_node = next((t for t in types if t.get("type") == query.type), None)
+    if type_node is None:
+        raise ValueError(f"Unknown type {query.type!r} under force {query.force!r}.")
+    return [r for r in (type_node.get("roles") or []) if r]
+
+
+async def action_list_classification_values(
+    integration: Integration, action_config: ListClassificationValuesQuery
+):
+    """Reference action: next level of the CMORE classification tree."""
+    auth = _get_auth_config(integration)
+    async with CmoreClient(
+        base_url=auth.base_url, token=auth.token.get_secret_value()
+    ) as client:
+        tree = await client.get_classification_tree()
+    values = _classification_options(tree, action_config)
+    return ReferenceDataResponse(
+        options=[ReferenceOption(value=v) for v in values]
+    ).dict()
 
 
 async def _resolve_client_id(
