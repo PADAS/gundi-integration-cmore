@@ -40,8 +40,8 @@ RAW_TAGS = [
                     {"id": 261, "name": "Evidence Type", "dataType": "Lookup",
                      "allowMultipleValues": True,
                      "lookups": [
-                         {"id": 1667, "value": "Abalone Harvesting", "order": 1},
-                         {"id": 1669, "value": "Camp", "order": 3},
+                         {"id": 1667, "value": "Abalone Harvesting", "order": 3},
+                         {"id": 1669, "value": "Camp", "order": 1},
                      ]},
                 ],
             },
@@ -142,6 +142,9 @@ async def test_list_tag_fields_unknown_tag_raises(integration, mock_cmore_client
 
 @pytest.mark.asyncio
 async def test_list_field_options_returns_lookup_values(integration, mock_cmore_client):
+    """Lookups are listed out of CMORE `order` in the raw fixture (Abalone
+    Harvesting=3, Camp=1), so this exercises the sort rather than happening
+    to pass with list order."""
     from app.actions.configurations import ListFieldOptionsQuery
     from app.actions.handlers import action_list_field_options
 
@@ -149,7 +152,57 @@ async def test_list_field_options_returns_lookup_values(integration, mock_cmore_
         integration,
         ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Evidence Type"),
     )
-    assert [o["value"] for o in result["options"]] == ["Abalone Harvesting", "Camp"]
+    assert [o["value"] for o in result["options"]] == ["Camp", "Abalone Harvesting"]
+
+
+@pytest.mark.asyncio
+async def test_list_field_options_sorts_missing_order_after_ordered_and_by_value(
+    integration, mock_cmore_client
+):
+    """Lookups without an `order` fall back to sorting after ordered ones,
+    then alphabetically by value."""
+    from app.actions.configurations import ListFieldOptionsQuery
+    from app.actions.handlers import action_list_field_options
+
+    raw_tags = [
+        {
+            "id": 8,
+            "name": "Wildlife",
+            "tags": [
+                {
+                    "id": 20,
+                    "name": "Evidence of Poacher",
+                    "typeLimiter": "Incident",
+                    "fields": [
+                        {
+                            "id": 261,
+                            "name": "Evidence Type",
+                            "dataType": "Lookup",
+                            "allowMultipleValues": True,
+                            "lookups": [
+                                {"id": 1, "value": "Zebra Tracks", "order": None},
+                                {"id": 2, "value": "Camp", "order": 2},
+                                {"id": 3, "value": "Abalone Harvesting", "order": None},
+                                {"id": 4, "value": "Snare", "order": 1},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+    ]
+    mock_cmore_client.get_tags = AsyncMock(return_value=raw_tags)
+
+    result = await action_list_field_options(
+        integration,
+        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Evidence Type"),
+    )
+    assert [o["value"] for o in result["options"]] == [
+        "Snare",
+        "Camp",
+        "Abalone Harvesting",
+        "Zebra Tracks",
+    ]
 
 
 @pytest.mark.asyncio

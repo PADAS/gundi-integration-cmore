@@ -141,11 +141,15 @@ async def action_list_field_options(
         )
     if field_info.data_type not in ("Lookup", "FixedLookup"):
         return ReferenceDataResponse(options=[]).dict()
-    options = [
-        ReferenceOption(value=lookup["value"])
-        for lookup in field_info.lookups
-        if lookup.get("value")
-    ]
+    lookups = [lookup for lookup in field_info.lookups if lookup.get("value")]
+    lookups.sort(
+        key=lambda lookup: (
+            lookup.get("order") is None,
+            lookup.get("order") if lookup.get("order") is not None else 0,
+            lookup["value"],
+        )
+    )
+    options = [ReferenceOption(value=lookup["value"]) for lookup in lookups]
     return ReferenceDataResponse(options=options).dict()
 
 
