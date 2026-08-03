@@ -26,12 +26,13 @@ from app.datasource.schemas import (
     CmoreVirtualClientRequest,
     UploadType,
 )
-from app.datasource.tag_index import tag_index
+from app.datasource.tag_index import tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
+from .core import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,127 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     except Exception as e:
         return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
     return {"valid_credentials": True}
+
+
+async def _fetch_tag_index(integration: Integration) -> dict:
+    """Fresh tag fetch for reference actions (config-time UX).
+
+    Deliberately bypasses the module-level tag_index cache: that cache is
+    per-process with no TTL, tuned for per-event delivery cost. A config
+    form fetch must reflect current CMORE state.
+    """
+    auth = _get_auth_config(integration)
+    async with CmoreClient(
+        base_url=auth.base_url, token=auth.token.get_secret_value()
+    ) as client:
+        raw = await client.get_tags()
+    return _build_index(raw)
+
+
+async def action_list_tag_names(
+    integration: Integration, action_config: ListTagNamesQuery
+):
+    """Reference action: all CMORE tag names visible to this integration."""
+    index = await _fetch_tag_index(integration)
+    options = [
+        ReferenceOption(value=tag.name, group=tag.domain)
+        for tag in index.values()
+    ]
+    options.sort(key=lambda o: (o.group or "", o.value))
+    return ReferenceDataResponse(options=options).dict()
+
+
+async def action_list_tag_fields(
+    integration: Integration, action_config: ListTagFieldsQuery
+):
+    """Reference action: field names within one CMORE tag."""
+    index = await _fetch_tag_index(integration)
+    tag = index.get(action_config.tag_name)
+    if tag is None:
+        raise ValueError(
+            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+        )
+    options = [
+        ReferenceOption(value=f.name, description=f.data_type)
+        for f in tag.fields.values()
+    ]
+    return ReferenceDataResponse(options=options).dict()
+
+
+async def action_list_field_options(
+    integration: Integration, action_config: ListFieldOptionsQuery
+):
+    """Reference action: allowed values for a Lookup/FixedLookup field.
+
+    Non-lookup fields legitimately return an empty options list — they are
+    free-text in CMORE, so there is nothing to suggest.
+    """
+    index = await _fetch_tag_index(integration)
+    tag = index.get(action_config.tag_name)
+    if tag is None:
+        raise ValueError(
+            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+        )
+    field_info = tag.field_by_name(action_config.field_name)
+    if field_info is None:
+        raise ValueError(
+            f"Unknown field {action_config.field_name!r} in CMORE tag "
+            f"{action_config.tag_name!r}."
+        )
+    if field_info.data_type not in ("Lookup", "FixedLookup"):
+        return ReferenceDataResponse(options=[]).dict()
+    lookups = [lookup for lookup in field_info.lookups if lookup.get("value")]
+    lookups.sort(
+        key=lambda lookup: (
+            lookup.get("order") is None,
+            lookup.get("order") if lookup.get("order") is not None else 0,
+            lookup["value"],
+        )
+    )
+    options = [ReferenceOption(value=lookup["value"]) for lookup in lookups]
+    return ReferenceDataResponse(options=options).dict()
+
+
+def _classification_options(tree: list, query) -> list:
+    """Walk the classification tree one level past the deepest set param."""
+    if not query.battleDimension:
+        return [n["battleDimension"] for n in tree if n.get("battleDimension")]
+    node = next(
+        (n for n in tree if n.get("battleDimension") == query.battleDimension), None
+    )
+    if node is None:
+        raise ValueError(f"Unknown battleDimension {query.battleDimension!r}.")
+    forces = node.get("forces") or []
+    if not query.force:
+        return [f["force"] for f in forces if f.get("force")]
+    force_node = next((f for f in forces if f.get("force") == query.force), None)
+    if force_node is None:
+        raise ValueError(
+            f"Unknown force {query.force!r} under battleDimension "
+            f"{query.battleDimension!r}."
+        )
+    types = force_node.get("types") or []
+    if not query.type:
+        return [t["type"] for t in types if t.get("type")]
+    type_node = next((t for t in types if t.get("type") == query.type), None)
+    if type_node is None:
+        raise ValueError(f"Unknown type {query.type!r} under force {query.force!r}.")
+    return [r for r in (type_node.get("roles") or []) if r]
+
+
+async def action_list_classification_values(
+    integration: Integration, action_config: ListClassificationValuesQuery
+):
+    """Reference action: next level of the CMORE classification tree."""
+    auth = _get_auth_config(integration)
+    async with CmoreClient(
+        base_url=auth.base_url, token=auth.token.get_secret_value()
+    ) as client:
+        tree = await client.get_classification_tree()
+    values = _classification_options(tree, action_config)
+    return ReferenceDataResponse(
+        options=[ReferenceOption(value=v) for v in values]
+    ).dict()
 
 
 async def _resolve_client_id(

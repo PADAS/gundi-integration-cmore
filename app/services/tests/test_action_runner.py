@@ -724,3 +724,119 @@ async def test_execute_action_handles_httpx_error_carrying_no_request(
     error_details = json.loads(response.body)["detail"]
     assert error_details["error"] == "Could not reach the provider — connection failed"
     assert error_details["error_type"] == "connectivity"
+
+
+@pytest.mark.asyncio
+async def test_execute_reference_action_with_no_stored_config_and_no_overrides(
+        mocker, mock_gundi_client_v2, mock_publish_event, mock_config_manager,
+        integration_v2_as_dict,
+):
+    """A stateless reference action with an all-optional query must execute
+    even when the integration stores no config for it and the caller sends
+    no config_overrides (previously a 404 'configuration missing')."""
+    from gundi_core.schemas.v2 import Integration
+    from app.actions.core import ReferenceActionConfiguration
+
+    class ListThingsQuery(ReferenceActionConfiguration):
+        parent: str = ""
+
+    captured = {}
+
+    async def action_list_things(integration, action_config: ListThingsQuery):
+        captured["config"] = action_config
+        return {"options": [{"value": "a"}]}
+
+    integration_no_config = Integration.parse_obj({**integration_v2_as_dict, "configurations": []})
+
+    mocker.patch(
+        "app.services.action_runner.action_handlers",
+        {"list_things": (action_list_things, ListThingsQuery, None)},
+    )
+    mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
+    mocker.patch("app.services.action_runner.config_manager", mock_config_manager)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mock_config_manager.get_integration_details.return_value = async_return(integration_no_config)
+    mock_config_manager.get_action_configuration.return_value = async_return(None)
+
+    result = await execute_action(
+        integration_id=str(integration_no_config.id),
+        action_id="list_things",
+    )
+
+    assert captured["config"].parent == ""
+    assert result == {"options": [{"value": "a"}]}
+
+
+@pytest.mark.asyncio
+async def test_execute_reference_action_handler_error_does_not_leak_config(
+        mocker, mock_gundi_client_v2, mock_publish_event, mock_config_manager,
+        integration_v2,
+):
+    """A reference action's handler failure (e.g. an unknown tag after a CMORE
+    rename, or a 5xx from CMORE) is routine at interactive-fetch frequency.
+    Unlike other action types, it must NOT attach the integration's stored
+    configurations (which include the raw auth token) to the published
+    IntegrationActionFailed event or the JSON error response."""
+    from app.actions.core import ReferenceActionConfiguration
+
+    class ListThingsQuery(ReferenceActionConfiguration):
+        parent: str = ""
+
+    async def action_list_things_boom(integration, action_config: ListThingsQuery):
+        raise ValueError("boom")
+
+    mocker.patch(
+        "app.services.action_runner.action_handlers",
+        {"list_things": (action_list_things_boom, ListThingsQuery, None)},
+    )
+    mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
+    mocker.patch("app.services.action_runner.config_manager", mock_config_manager)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mock_config_manager.get_action_configuration.return_value = async_return(None)
+
+    response = await execute_action(
+        integration_id=str(integration_v2.id),
+        action_id="list_things",
+    )
+
+    # The auth config in the shared integration_v2 fixture carries this token.
+    auth_token = "testtoken2a97022f21732461ee103a08fac8a35"
+
+    response_body = json.loads(response.body)
+    assert auth_token not in json.dumps(response_body)
+    assert "configurations" not in response_body["detail"]["config_data"]
+
+    failed_events = _published_events_of_type(mock_publish_event, IntegrationActionFailed)
+    assert len(failed_events) == 1
+    assert auth_token not in failed_events[0].json()
+    assert not failed_events[0].payload.config_data.get("configurations")
+
+
+@pytest.mark.asyncio
+async def test_non_pull_non_reference_action_with_no_config_and_no_overrides_still_404s(
+        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
+        mock_publish_event, mock_action_handlers,
+):
+    # Pins the three-way branch in execute_action: a plain (non-pull,
+    # non-reference) action with neither stored config nor config_overrides
+    # must still hit the strict "configuration missing" 404 path.
+    mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
+    mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
+    mocker.patch("app.services.action_runner.config_manager", mock_config_manager)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mock_config_manager.get_action_configuration.return_value = async_return(None)
+
+    response = api_client.post(
+        "/v1/actions/execute/",
+        json={
+            "integration_id": str(integration_v2.id),
+            "action_id": "pull_observations_by_date",
+        }
+    )
+
+    assert response.status_code == 404
+    mock_action_handler, _, _ = mock_action_handlers["pull_observations_by_date"]
+    assert not mock_action_handler.called
