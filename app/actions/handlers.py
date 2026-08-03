@@ -31,7 +31,7 @@ from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery
 from .core import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,23 @@ async def action_list_tag_names(
         for tag in index.values()
     ]
     options.sort(key=lambda o: (o.group or "", o.value))
+    return ReferenceDataResponse(options=options).dict()
+
+
+async def action_list_tag_fields(
+    integration: Integration, action_config: ListTagFieldsQuery
+):
+    """Reference action: field names within one CMORE tag."""
+    index = await _fetch_tag_index(integration)
+    tag = index.get(action_config.tag_name)
+    if tag is None:
+        raise ValueError(
+            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+        )
+    options = [
+        ReferenceOption(value=f.name, description=f.data_type)
+        for f in tag.fields.values()
+    ]
     return ReferenceDataResponse(options=options).dict()
 
 

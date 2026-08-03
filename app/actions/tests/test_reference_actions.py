@@ -112,3 +112,29 @@ async def test_list_tag_names_propagates_upstream_errors(
     )
     with pytest.raises(httpx.HTTPStatusError):
         await action_list_tag_names(integration, ListTagNamesQuery())
+
+
+@pytest.mark.asyncio
+async def test_list_tag_fields_returns_fields_for_tag(integration, mock_cmore_client):
+    from app.actions.configurations import ListTagFieldsQuery
+    from app.actions.handlers import action_list_tag_fields
+
+    result = await action_list_tag_fields(
+        integration, ListTagFieldsQuery(tag_name="Evidence of Poacher")
+    )
+
+    assert [(o["value"], o["description"]) for o in result["options"]] == [
+        ("Reported By", "String"),
+        ("Evidence Type", "Lookup"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_tag_fields_unknown_tag_raises(integration, mock_cmore_client):
+    from app.actions.configurations import ListTagFieldsQuery
+    from app.actions.handlers import action_list_tag_fields
+
+    with pytest.raises(ValueError, match="No Such Tag"):
+        await action_list_tag_fields(
+            integration, ListTagFieldsQuery(tag_name="No Such Tag")
+        )
