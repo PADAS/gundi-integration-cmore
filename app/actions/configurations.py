@@ -3,7 +3,7 @@ from typing import List, Optional
 import pydantic
 from app.datasource.schemas import Affiliation, CmoreClassification
 from app.services.utils import FieldWithUIOptions, GlobalUISchemaOptions, UIOptions
-from .core import AuthActionConfiguration, ExecutableActionMixin, PushActionConfiguration
+from .core import AuthActionConfiguration, ExecutableActionMixin, PushActionConfiguration, ReferenceActionConfiguration
 
 
 class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
@@ -30,6 +30,10 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(
         order=["base_url", "token", "owner_group_id"],
     )
+
+
+class ListTagNamesQuery(ReferenceActionConfiguration):
+    """Query model for action_list_tag_names (no parameters)."""
 
 
 # NOTE: Dict[str, NestedModel] would be the natural Pydantic shape for the

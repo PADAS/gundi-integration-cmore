@@ -26,12 +26,13 @@ from app.datasource.schemas import (
     CmoreVirtualClientRequest,
     UploadType,
 )
-from app.datasource.tag_index import tag_index
+from app.datasource.tag_index import tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery
+from .core import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,34 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     except Exception as e:
         return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
     return {"valid_credentials": True}
+
+
+async def _fetch_tag_index(integration: Integration) -> dict:
+    """Fresh tag fetch for reference actions (config-time UX).
+
+    Deliberately bypasses the module-level tag_index cache: that cache is
+    per-process with no TTL, tuned for per-event delivery cost. A config
+    form fetch must reflect current CMORE state.
+    """
+    auth = _get_auth_config(integration)
+    async with CmoreClient(
+        base_url=auth.base_url, token=auth.token.get_secret_value()
+    ) as client:
+        raw = await client.get_tags()
+    return _build_index(raw)
+
+
+async def action_list_tag_names(
+    integration: Integration, action_config: ListTagNamesQuery
+):
+    """Reference action: all CMORE tag names visible to this integration."""
+    index = await _fetch_tag_index(integration)
+    options = [
+        ReferenceOption(value=tag.name, group=tag.domain)
+        for tag in index.values()
+    ]
+    options.sort(key=lambda o: (o.group or "", o.value))
+    return ReferenceDataResponse(options=options).dict()
 
 
 async def _resolve_client_id(
