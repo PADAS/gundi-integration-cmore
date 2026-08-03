@@ -138,3 +138,41 @@ async def test_list_tag_fields_unknown_tag_raises(integration, mock_cmore_client
         await action_list_tag_fields(
             integration, ListTagFieldsQuery(tag_name="No Such Tag")
         )
+
+
+@pytest.mark.asyncio
+async def test_list_field_options_returns_lookup_values(integration, mock_cmore_client):
+    from app.actions.configurations import ListFieldOptionsQuery
+    from app.actions.handlers import action_list_field_options
+
+    result = await action_list_field_options(
+        integration,
+        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Evidence Type"),
+    )
+    assert [o["value"] for o in result["options"]] == ["Abalone Harvesting", "Camp"]
+
+
+@pytest.mark.asyncio
+async def test_list_field_options_non_lookup_field_returns_empty(
+    integration, mock_cmore_client
+):
+    from app.actions.configurations import ListFieldOptionsQuery
+    from app.actions.handlers import action_list_field_options
+
+    result = await action_list_field_options(
+        integration,
+        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Reported By"),
+    )
+    assert result["options"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_field_options_unknown_field_raises(integration, mock_cmore_client):
+    from app.actions.configurations import ListFieldOptionsQuery
+    from app.actions.handlers import action_list_field_options
+
+    with pytest.raises(ValueError, match="No Such Field"):
+        await action_list_field_options(
+            integration,
+            ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="No Such Field"),
+        )

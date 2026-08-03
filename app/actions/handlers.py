@@ -31,7 +31,7 @@ from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery
+from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery
 from .core import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -115,6 +115,36 @@ async def action_list_tag_fields(
     options = [
         ReferenceOption(value=f.name, description=f.data_type)
         for f in tag.fields.values()
+    ]
+    return ReferenceDataResponse(options=options).dict()
+
+
+async def action_list_field_options(
+    integration: Integration, action_config: ListFieldOptionsQuery
+):
+    """Reference action: allowed values for a Lookup/FixedLookup field.
+
+    Non-lookup fields legitimately return an empty options list — they are
+    free-text in CMORE, so there is nothing to suggest.
+    """
+    index = await _fetch_tag_index(integration)
+    tag = index.get(action_config.tag_name)
+    if tag is None:
+        raise ValueError(
+            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+        )
+    field_info = tag.field_by_name(action_config.field_name)
+    if field_info is None:
+        raise ValueError(
+            f"Unknown field {action_config.field_name!r} in CMORE tag "
+            f"{action_config.tag_name!r}."
+        )
+    if field_info.data_type not in ("Lookup", "FixedLookup"):
+        return ReferenceDataResponse(options=[]).dict()
+    options = [
+        ReferenceOption(value=lookup["value"])
+        for lookup in field_info.lookups
+        if lookup.get("value")
     ]
     return ReferenceDataResponse(options=options).dict()
 

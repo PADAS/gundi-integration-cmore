@@ -42,6 +42,13 @@ class ListTagFieldsQuery(ReferenceActionConfiguration):
     tag_name: str
 
 
+class ListFieldOptionsQuery(ReferenceActionConfiguration):
+    """Query model for action_list_field_options."""
+
+    tag_name: str
+    field_name: str
+
+
 # NOTE: Dict[str, NestedModel] would be the natural Pydantic shape for the
 # mappings below, but the Gundi portal's form renderer mis-handles
 # `additionalProperties` with object values and displays "[object Object]"
