@@ -207,6 +207,19 @@ class SubjectClassificationMapping(pydantic.BaseModel):
     )
 
 
+def _reference(action: str, params: Optional[dict] = None) -> dict:
+    """Build a gundi:reference ui_schema annotation (spec: docs/superpowers/
+    specs/2026-07-31-reference-data-config-ui-design.md §2). Deliberately
+    does NOT set ui:widget — portals without reference support must keep
+    rendering plain text fields."""
+    return {
+        "action": action,
+        "target": "self",
+        "params": params or {},
+        "allow_free_text": True,
+    }
+
+
 class DeliverConfig(PushActionConfiguration):
     """Combined config for the single action_deliver handler.
 
@@ -324,4 +337,43 @@ class DeliverConfig(PushActionConfiguration):
                 },
             },
         })
+
+        # Reference-data annotations (inert until the portal supports them).
+        event_items = base["event_type_to_tag"]["items"]
+        event_items["tag_name"]["gundi:reference"] = _reference("list_tag_names")
+        field_items = event_items["field_mappings"]["items"]
+        field_items["cmore_field_name"]["gundi:reference"] = _reference(
+            "list_tag_fields", {"tag_name": {"$data": "../../tag_name"}}
+        )
+        value_items = field_items["value_mappings"]["items"]
+        value_items["to_value"]["gundi:reference"] = _reference(
+            "list_field_options",
+            {
+                "tag_name": {"$data": "../../../../tag_name"},
+                "field_name": {"$data": "../../cmore_field_name"},
+            },
+        )
+        classification_items = base["subject_type_to_classification"]["items"]
+        classification_items["battleDimension"]["gundi:reference"] = _reference(
+            "list_classification_values"
+        )
+        classification_items["force"]["gundi:reference"] = _reference(
+            "list_classification_values",
+            {"battleDimension": {"$data": "battleDimension"}},
+        )
+        classification_items["type"]["gundi:reference"] = _reference(
+            "list_classification_values",
+            {
+                "battleDimension": {"$data": "battleDimension"},
+                "force": {"$data": "force"},
+            },
+        )
+        classification_items["role"]["gundi:reference"] = _reference(
+            "list_classification_values",
+            {
+                "battleDimension": {"$data": "battleDimension"},
+                "force": {"$data": "force"},
+                "type": {"$data": "type"},
+            },
+        )
         return base
