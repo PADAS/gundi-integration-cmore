@@ -476,6 +476,10 @@ instance and share group.</p>
 <td><strong>Event updates</strong> (edits to an event — new notes, status/priority/title changes)</td>
 <td><strong>comments</strong> on the original CMORE event</td>
 </tr>
+<tr>
+<td><strong>Attachments</strong> (photos and documents on an ER event)</td>
+<td><strong>media comments</strong> on the delivered CMORE event</td>
+</tr>
 </tbody>
 </table>
 <p>For observations, the runner <strong>auto-creates the GNode</strong> the first time it sees a
@@ -487,11 +491,11 @@ ID). If a tag mapping is configured for the event's type, the event arrives
 already classified, with its CMORE tag fields populated from the event details.
 A deep link back to the source event is added as a comment so CMORE users can
 click through to the origin system.</p>
-<ul>
-<li><strong>Attachments</strong> — files attached to ER events (photos, documents) are posted to
-  CMORE as media comments on the mapped event (multipart <code>POST /comment</code>).
-  Requires the <code>BUCKET_NAME</code> env var and read access to Gundi's attachments bucket.</li>
-</ul>
+<p>For attachments, files attached to an ER event are posted as <strong>media comments</strong>
+on the already-delivered CMORE event, so photos show up alongside the report.
+Attachment forwarding is <strong>opt-in on the EarthRanger provider</strong> ("Forward Event
+Attachments") and requires the runner to have read access to Gundi's
+attachments bucket — see <a href="configuration/#attachments">Configuration → Attachments</a>.</p>
 <h2 id="where-it-sits-in-gundi">Where it sits in Gundi<a class="headerlink" href="#where-it-sits-in-gundi" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>EarthRanger ──► EarthRanger action runner ──► Gundi (portal + routing)
                                                    │

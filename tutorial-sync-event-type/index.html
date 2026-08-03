@@ -878,6 +878,16 @@ EarthRanger and <em>how often</em> Gundi checks for new ones.</p>
    appear in CMORE after the next run).</li>
 </ol>
 <p><img alt="Pull Events: the event-type filter and Run On Schedule toggle" src="../images/gundi-07-er-event-filter.png" /></p>
+<blockquote>
+<p><strong>Want photos to come along too?</strong> Also turn on <strong>Forward Event
+Attachments</strong> in the same Pull Events section (it's off by default). Files
+attached to the ER event — photos, documents — then arrive in CMORE as
+<strong>media comments</strong> on the delivered event. Photos added <em>after</em> the event
+was first shared are picked up on a later polling run. This also needs a
+one-time storage-access setup on the integration side — if you turn it on
+and attachments don't arrive, see
+<a href="../troubleshooting/#attachments-dont-appear-in-cmore">Troubleshooting</a>.</p>
+</blockquote>
 <h2 id="part-4-see-it-work">Part 4: See it work<a class="headerlink" href="#part-4-see-it-work" title="Permanent link">&para;</a></h2>
 <p>Time to prove the pipeline end-to-end.</p>
 <ol>
@@ -899,9 +909,11 @@ EarthRanger and <em>how often</em> Gundi checks for new ones.</p>
 <li>the <strong>description and location</strong> from EarthRanger,</li>
 <li>the <strong>Rhino Carcass tag</strong> with the mapped fields filled in,</li>
 <li>a <strong>comment with a link back to the EarthRanger event</strong>, so anyone in
-     CMORE can click through to the source, and</li>
+     CMORE can click through to the source,</li>
 <li>source <strong>Generated</strong>, meaning it was posted by the integration, not
-     typed by a person.</li>
+     typed by a person, and</li>
+<li>if you attached a photo in EarthRanger <em>and</em> enabled <strong>Forward Event
+     Attachments</strong> (Part 3), the photo as a <strong>media comment</strong> on the event.</li>
 </ol>
 <p><img alt="The test event delivered to CMORE" src="../images/cmore-15-delivered-event.png" /></p>
 <p>In our test run, "White Rhino / Sub-adult / Female" from EarthRanger
@@ -945,6 +957,11 @@ report is shared automatically. To share more event types, repeat Part 2.3
 <td><strong>No link back to EarthRanger</strong> on the event</td>
 <td>Deep-link comment issue</td>
 <td><a href="../troubleshooting/#the-source-deep-link-doesnt-appear-in-cmore">The source deep link doesn't appear in CMORE</a></td>
+</tr>
+<tr>
+<td><strong>Photos on the event don't arrive</strong></td>
+<td>Forward Event Attachments toggle off, or storage access not set up</td>
+<td><a href="../troubleshooting/#attachments-dont-appear-in-cmore">Attachments don't appear in CMORE</a></td>
 </tr>
 </tbody>
 </table>

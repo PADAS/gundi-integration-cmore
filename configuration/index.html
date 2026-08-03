@@ -427,6 +427,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#attachments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attachments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Attachments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ordering-attachment-before-its-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ordering: attachment before its event
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scaffolding-mappings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -575,6 +603,39 @@ arrays with an explicit key field, and the classification's four fields are
 flattened onto the array item. This is a workaround for a portal bug
 (GUNDI-5371) and will be simplified once that's fixed.</p>
 </blockquote>
+<hr />
+<h2 id="attachments">Attachments<a class="headerlink" href="#attachments" title="Permanent link">&para;</a></h2>
+<p>Files attached to ER events (photos, documents) are delivered as <strong>media
+comments</strong> on the mapped CMORE event — CMORE has no event-attachment endpoint,
+so a file-bearing comment (multipart <code>POST /comment</code>) is how photos appear on
+an event in the CMORE UI. Each comment is titled
+<code>EarthRanger attachment: &lt;filename&gt;</code>.</p>
+<p>There is <strong>no per-integration setting on the CMORE side</strong> — attachments are
+delivered automatically once the pieces below are in place:</p>
+<ol>
+<li><strong>Enable forwarding on the EarthRanger provider.</strong> In the connection's
+   <strong>Provider → Pull Events</strong> config, turn on <strong>Forward Event Attachments</strong>
+   (off by default). Files added to an event after it was first forwarded are
+   picked up on subsequent pull runs.</li>
+<li><strong>Runner environment</strong> (per-deployment, not per-integration):<ul>
+<li><code>BUCKET_NAME</code> env var — the GCS bucket where Gundi stores attachment
+  files (<code>cdip-files-&lt;env&gt;</code>; same name/value the classic dispatchers use).
+  Set via the infra repo's <code>additional_env_vars</code>.</li>
+<li>The runner's service account needs <strong>read access</strong>
+  (<code>roles/storage.objectViewer</code>) on that bucket — routing hands the runner
+  only the blob name, and it downloads the bytes itself.</li>
+</ul>
+</li>
+</ol>
+<h3 id="ordering-attachment-before-its-event">Ordering: attachment before its event<a class="headerlink" href="#ordering-attachment-before-its-event" title="Permanent link">&para;</a></h3>
+<p>Message ordering isn't guaranteed, so an attachment can arrive <strong>before</strong> the
+event it belongs to has been delivered. The runner treats this as a <em>retryable
+wait</em>, not a failure: the delivery raises a <code>dependency_not_ready</code> error
+("Waiting for a related object to be delivered") and PubSub redelivers it with
+backoff until the parent event's CMORE message exists. Occasional entries of
+this kind in the activity log are normal; see
+<a href="../troubleshooting/#attachments-dont-appear-in-cmore">Troubleshooting</a> if they
+persist.</p>
 <hr />
 <h2 id="scaffolding-mappings">Scaffolding mappings<a class="headerlink" href="#scaffolding-mappings" title="Permanent link">&para;</a></h2>
 <p>The repo ships a CLI that <strong>generates</strong> an <code>event_type_to_tag</code> mapping from a

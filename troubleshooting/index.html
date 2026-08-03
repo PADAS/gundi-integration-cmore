@@ -429,6 +429,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#attachments-dont-appear-in-cmore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attachments don't appear in CMORE
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#an-event-edits-comment-lands-on-the-wrong-event" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -556,6 +567,33 @@ the runner. The whole chain must carry it:</p>
 <div class="highlight"><pre><span></span><code>_push_event received: ... provider_metadata={&#39;source_event_url&#39;: &#39;...&#39;}
 </code></pre></div>
 <code>provider_metadata=None</code> there means it was dropped upstream.</p>
+<h2 id="attachments-dont-appear-in-cmore">Attachments don't appear in CMORE<a class="headerlink" href="#attachments-dont-appear-in-cmore" title="Permanent link">&para;</a></h2>
+<p>Photos/files on an ER event should arrive as <strong>media comments</strong> on the
+delivered CMORE event (titled <code>EarthRanger attachment: &lt;filename&gt;</code>). Check in
+order:</p>
+<ul>
+<li><strong>Forwarding not enabled.</strong> The EarthRanger provider's <strong>Forward Event
+  Attachments</strong> toggle (Provider → Pull Events) is <strong>off by default</strong>. Nothing
+  reaches this runner until it's on.</li>
+<li><strong><code>BUCKET_NAME</code> not set on the runner.</strong> Log line:
+  <div class="highlight"><pre><span></span><code>BUCKET_NAME env var is not set; cannot download Gundi attachments.
+</code></pre></div>
+  Set it to Gundi's attachments bucket (<code>cdip-files-&lt;env&gt;</code>) via the infra
+  repo's <code>additional_env_vars</code>.</li>
+<li><strong>No read access to the bucket.</strong> A <code>403 Forbidden</code> from
+  <code>storage.googleapis.com</code> in the logs means the runner's service account
+  lacks <code>roles/storage.objectViewer</code> on the attachments bucket.</li>
+<li><strong>Stuck waiting for the parent event.</strong> Activity-log entries titled
+  <strong>"Waiting for a related object to be delivered"</strong> (<code>dependency_not_ready</code>)
+  are normal when an attachment arrives before its event — PubSub redelivers
+  with backoff and the comment posts once the event lands. If they <em>persist</em>,
+  the parent event itself never delivered: fix the event's delivery first
+  (see the sections above), and the attachment will follow on a retry.</li>
+<li><strong>File missing from storage.</strong> Activity-log ERROR <strong>"Attachment file not
+  found in storage — dropping"</strong> means the blob named in <code>file_path</code> isn't in
+  the bucket — usually a wrong <code>BUCKET_NAME</code> (pointing at the wrong
+  environment's bucket) rather than a genuinely missing file.</li>
+</ul>
 <h2 id="an-event-edits-comment-lands-on-the-wrong-event">An event edit's comment lands on the wrong event<a class="headerlink" href="#an-event-edits-comment-lands-on-the-wrong-event" title="Permanent link">&para;</a></h2>
 <p>The update→comment mapping is keyed by the event's <code>gundi_id</code> (unique per
 event). If comments attach to the wrong event, an older build keyed by
