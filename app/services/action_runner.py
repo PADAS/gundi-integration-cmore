@@ -16,7 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from gundi_core.events import IntegrationActionFailed, ActionExecutionFailed, LogLevel
 
-from app.actions.core import PullActionConfiguration
+from app.actions.core import PullActionConfiguration, ReferenceActionConfiguration
 from .config_manager import IntegrationConfigurationManager
 from .state import IntegrationStateManager
 from .activity_logger import publish_event, log_action_activity
@@ -234,10 +234,18 @@ async def execute_action(
     # portal) doesn't silently fall through to the automated default.
     is_manual = (triggered_by or "").strip().lower() == ActionTrigger.MANUAL.value
     skippable_pull = is_pull_action and not is_manual
+    # Reference actions are stateless: they never have stored config, and a
+    # caller sending no config_overrides (e.g. a zero-param query like
+    # list_tag_names) is a legitimate, complete request — not a 404. Required
+    # query params still fail Pydantic validation below with a 422, which is
+    # the correct signal to the portal.
+    is_reference_action = isinstance(config_model, type) and issubclass(
+        config_model, ReferenceActionConfiguration
+    )
 
     # Get the configuration needed to execute the action
     action_config = await config_manager.get_action_configuration(integration_id, action_id)
-    if not action_config and not config_overrides:
+    if not action_config and not config_overrides and not is_reference_action:
         if skippable_pull:
             return _skip_quietly(
                 integration_id, action_id,

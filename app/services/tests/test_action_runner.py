@@ -724,3 +724,45 @@ async def test_execute_action_handles_httpx_error_carrying_no_request(
     error_details = json.loads(response.body)["detail"]
     assert error_details["error"] == "Could not reach the provider — connection failed"
     assert error_details["error_type"] == "connectivity"
+
+
+@pytest.mark.asyncio
+async def test_execute_reference_action_with_no_stored_config_and_no_overrides(
+        mocker, mock_gundi_client_v2, mock_publish_event, mock_config_manager,
+        integration_v2_as_dict,
+):
+    """A stateless reference action with an all-optional query must execute
+    even when the integration stores no config for it and the caller sends
+    no config_overrides (previously a 404 'configuration missing')."""
+    from gundi_core.schemas.v2 import Integration
+    from app.actions.core import ReferenceActionConfiguration
+
+    class ListThingsQuery(ReferenceActionConfiguration):
+        parent: str = ""
+
+    captured = {}
+
+    async def action_list_things(integration, action_config: ListThingsQuery):
+        captured["config"] = action_config
+        return {"options": [{"value": "a"}]}
+
+    integration_no_config = Integration.parse_obj({**integration_v2_as_dict, "configurations": []})
+
+    mocker.patch(
+        "app.services.action_runner.action_handlers",
+        {"list_things": (action_list_things, ListThingsQuery, None)},
+    )
+    mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
+    mocker.patch("app.services.action_runner.config_manager", mock_config_manager)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mock_config_manager.get_integration_details.return_value = async_return(integration_no_config)
+    mock_config_manager.get_action_configuration.return_value = async_return(None)
+
+    result = await execute_action(
+        integration_id=str(integration_no_config.id),
+        action_id="list_things",
+    )
+
+    assert captured["config"].parent == ""
+    assert result == {"options": [{"value": "a"}]}
