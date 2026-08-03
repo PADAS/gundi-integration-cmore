@@ -73,6 +73,35 @@ _push_event received: ... provider_metadata={'source_event_url': '...'}
 ```
 `provider_metadata=None` there means it was dropped upstream.
 
+## Attachments don't appear in CMORE
+
+Photos/files on an ER event should arrive as **media comments** on the
+delivered CMORE event (titled `EarthRanger attachment: <filename>`). Check in
+order:
+
+- **Forwarding not enabled.** The EarthRanger provider's **Forward Event
+  Attachments** toggle (Provider → Pull Events) is **off by default**. Nothing
+  reaches this runner until it's on.
+- **`BUCKET_NAME` not set on the runner.** Log line:
+  ```
+  BUCKET_NAME env var is not set; cannot download Gundi attachments.
+  ```
+  Set it to Gundi's attachments bucket (`cdip-files-<env>`) via the infra
+  repo's `additional_env_vars`.
+- **No read access to the bucket.** A `403 Forbidden` from
+  `storage.googleapis.com` in the logs means the runner's service account
+  lacks `roles/storage.objectViewer` on the attachments bucket.
+- **Stuck waiting for the parent event.** Activity-log entries titled
+  **"Waiting for a related object to be delivered"** (`dependency_not_ready`)
+  are normal when an attachment arrives before its event — PubSub redelivers
+  with backoff and the comment posts once the event lands. If they *persist*,
+  the parent event itself never delivered: fix the event's delivery first
+  (see the sections above), and the attachment will follow on a retry.
+- **File missing from storage.** Activity-log ERROR **"Attachment file not
+  found in storage — dropping"** means the blob named in `file_path` isn't in
+  the bucket — usually a wrong `BUCKET_NAME` (pointing at the wrong
+  environment's bucket) rather than a genuinely missing file.
+
 ## An event edit's comment lands on the wrong event
 
 The update→comment mapping is keyed by the event's `gundi_id` (unique per

@@ -23,6 +23,7 @@ Two kinds of Gundi data flow to CMORE:
 | **Observations** (GPS tracks for a subject — vehicle, ranger, animal, device) | a **GNode** (virtual sensor) whose position updates as the subject moves |
 | **Events** (incident reports — sightings, carcasses, fence breaks, …) | a geolocated **event message**, optionally classified with a structured **tag** |
 | **Event updates** (edits to an event — new notes, status/priority/title changes) | **comments** on the original CMORE event |
+| **Attachments** (photos and documents on an ER event) | **media comments** on the delivered CMORE event |
 
 For observations, the runner **auto-creates the GNode** the first time it sees a
 new subject, then posts each subsequent position under it. Affiliation and
@@ -35,9 +36,11 @@ already classified, with its CMORE tag fields populated from the event details.
 A deep link back to the source event is added as a comment so CMORE users can
 click through to the origin system.
 
-- **Attachments** — files attached to ER events (photos, documents) are posted to
-  CMORE as media comments on the mapped event (multipart `POST /comment`).
-  Requires the `BUCKET_NAME` env var and read access to Gundi's attachments bucket.
+For attachments, files attached to an ER event are posted as **media comments**
+on the already-delivered CMORE event, so photos show up alongside the report.
+Attachment forwarding is **opt-in on the EarthRanger provider** ("Forward Event
+Attachments") and requires the runner to have read access to Gundi's
+attachments bucket — see [Configuration → Attachments](configuration.md#attachments).
 
 ## Where it sits in Gundi
 

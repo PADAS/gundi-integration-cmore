@@ -266,6 +266,15 @@ EarthRanger and *how often* Gundi checks for new ones.
 
    ![Pull Events: the event-type filter and Run On Schedule toggle](images/gundi-07-er-event-filter.png)
 
+> **Want photos to come along too?** Also turn on **Forward Event
+> Attachments** in the same Pull Events section (it's off by default). Files
+> attached to the ER event — photos, documents — then arrive in CMORE as
+> **media comments** on the delivered event. Photos added *after* the event
+> was first shared are picked up on a later polling run. This also needs a
+> one-time storage-access setup on the integration side — if you turn it on
+> and attachments don't arrive, see
+> [Troubleshooting](troubleshooting.md#attachments-dont-appear-in-cmore).
+
 ## Part 4: See it work
 
 Time to prove the pipeline end-to-end.
@@ -289,9 +298,11 @@ Time to prove the pipeline end-to-end.
    - the **description and location** from EarthRanger,
    - the **Rhino Carcass tag** with the mapped fields filled in,
    - a **comment with a link back to the EarthRanger event**, so anyone in
-     CMORE can click through to the source, and
+     CMORE can click through to the source,
    - source **Generated**, meaning it was posted by the integration, not
-     typed by a person.
+     typed by a person, and
+   - if you attached a photo in EarthRanger *and* enabled **Forward Event
+     Attachments** (Part 3), the photo as a **media comment** on the event.
 
    ![The test event delivered to CMORE](images/cmore-15-delivered-event.png)
 
@@ -313,6 +324,7 @@ report is shared automatically. To share more event types, repeat Part 2.3
 | **Nothing arrives** in CMORE at all | Event type not in the ER share filter, or routing/credentials problem | [Nothing reaches the runner at all](troubleshooting.md#nothing-reaches-the-runner-at-all) |
 | **Test Connection fails** | Wrong token, wrong base URL (must end in `/za/WebAPI/api`), or service not Active / not linked to your group (Part 1.3) | re-run Part 1.2–1.3, then Test Connection again |
 | **No link back to EarthRanger** on the event | Deep-link comment issue | [The source deep link doesn't appear in CMORE](troubleshooting.md#the-source-deep-link-doesnt-appear-in-cmore) |
+| **Photos on the event don't arrive** | Forward Event Attachments toggle off, or storage access not set up | [Attachments don't appear in CMORE](troubleshooting.md#attachments-dont-appear-in-cmore) |
 
 For anything deeper, the Gundi portal's activity log on the connection shows
 what was delivered, skipped, or errored — and the

@@ -77,6 +77,42 @@ These control how a subject's track renders on the CMORE map.
 
 ---
 
+## Attachments
+
+Files attached to ER events (photos, documents) are delivered as **media
+comments** on the mapped CMORE event — CMORE has no event-attachment endpoint,
+so a file-bearing comment (multipart `POST /comment`) is how photos appear on
+an event in the CMORE UI. Each comment is titled
+`EarthRanger attachment: <filename>`.
+
+There is **no per-integration setting on the CMORE side** — attachments are
+delivered automatically once the pieces below are in place:
+
+1. **Enable forwarding on the EarthRanger provider.** In the connection's
+   **Provider → Pull Events** config, turn on **Forward Event Attachments**
+   (off by default). Files added to an event after it was first forwarded are
+   picked up on subsequent pull runs.
+2. **Runner environment** (per-deployment, not per-integration):
+    - `BUCKET_NAME` env var — the GCS bucket where Gundi stores attachment
+      files (`cdip-files-<env>`; same name/value the classic dispatchers use).
+      Set via the infra repo's `additional_env_vars`.
+    - The runner's service account needs **read access**
+      (`roles/storage.objectViewer`) on that bucket — routing hands the runner
+      only the blob name, and it downloads the bytes itself.
+
+### Ordering: attachment before its event
+
+Message ordering isn't guaranteed, so an attachment can arrive **before** the
+event it belongs to has been delivered. The runner treats this as a *retryable
+wait*, not a failure: the delivery raises a `dependency_not_ready` error
+("Waiting for a related object to be delivered") and PubSub redelivers it with
+backoff until the parent event's CMORE message exists. Occasional entries of
+this kind in the activity log are normal; see
+[Troubleshooting](troubleshooting.md#attachments-dont-appear-in-cmore) if they
+persist.
+
+---
+
 ## Scaffolding mappings
 
 The repo ships a CLI that **generates** an `event_type_to_tag` mapping from a
