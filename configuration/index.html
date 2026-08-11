@@ -455,10 +455,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#scaffolding-mappings" class="md-nav__link">
+  <a href="#reference-dropdowns-in-the-portal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Scaffolding mappings
+        Reference dropdowns in the portal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reference dropdowns in the portal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-earthranger-providers-on-one-cmore-destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple EarthRanger providers on one CMORE destination
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scaffolding-mappings-cli-alternative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaffolding mappings (CLI alternative)
       
     </span>
   </a>
@@ -587,7 +615,7 @@ comment) but <strong>without</strong> a structured tag.</p>
 </ul>
 <blockquote>
 <p>Authoring these mappings by hand is tedious for tag-heavy event types. Use
-the <a href="#scaffolding-mappings">scaffold tool</a> to generate most of it.</p>
+the <a href="#scaffolding-mappings-cli-alternative">scaffold tool</a> to generate most of it.</p>
 </blockquote>
 <h3 id="subject-affiliation-classification-for-gps-tracks">Subject affiliation &amp; classification (for GPS tracks)<a class="headerlink" href="#subject-affiliation-classification-for-gps-tracks" title="Permanent link">&para;</a></h3>
 <p>These control how a subject's track renders on the CMORE map.</p>
@@ -637,7 +665,48 @@ this kind in the activity log are normal; see
 <a href="../troubleshooting/#attachments-dont-appear-in-cmore">Troubleshooting</a> if they
 persist.</p>
 <hr />
-<h2 id="scaffolding-mappings">Scaffolding mappings<a class="headerlink" href="#scaffolding-mappings" title="Permanent link">&para;</a></h2>
+<h2 id="reference-dropdowns-in-the-portal">Reference dropdowns in the portal<a class="headerlink" href="#reference-dropdowns-in-the-portal" title="Permanent link">&para;</a></h2>
+<p>The Deliver mapping form's pick-a-value fields render as <strong>live dropdowns</strong> in
+the Gundi portal (combobox with free-text entry). Options are fetched on
+demand — when you open a dropdown, never on page load — through the
+integrations' <em>reference actions</em>:</p>
+<ul>
+<li><strong>CMORE-side fields</strong> (<code>tag_name</code>, <code>cmore_field_name</code>, <code>to_value</code>, and the
+  classification fields) list live values from <strong>this CMORE instance</strong>: tag
+  names, a tag's fields, a field's allowed options, and the classification
+  tree.</li>
+<li><strong>EarthRanger-side fields</strong> (<code>event_type</code>, <code>event_details_key</code>,
+  <code>from_value</code>) list live values from the <strong>connected EarthRanger
+  provider(s)</strong>: event types (grouped by category), an event type's fields,
+  and a choice field's values. Only <strong>v2</strong> ER event types are offered — see
+  the ER runner's
+  <a href="https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/">reference actions</a>
+  docs for details; classic v1 types can still be typed manually.</li>
+</ul>
+<p>Dropdowns cascade: picking a <code>tag_name</code> scopes the <code>cmore_field_name</code> list to
+that tag's fields; picking an <code>event_type</code> scopes <code>event_details_key</code>, and so
+on. Every field stays usable no matter what: while a parent value is empty, or
+if a fetch fails or nothing offers options, the field is a plain free-text
+input (with a retry link on failure). A saved value that's no longer among the
+fetched options gets a warning badge but is <strong>never</strong> changed automatically.</p>
+<h3 id="multiple-earthranger-providers-on-one-cmore-destination">Multiple EarthRanger providers on one CMORE destination<a class="headerlink" href="#multiple-earthranger-providers-on-one-cmore-destination" title="Permanent link">&para;</a></h3>
+<p>A CMORE integration's Deliver config is shared by <strong>all</strong> of its connections,
+so when several ER providers deliver into the same CMORE integration, the
+ER-side dropdowns show the <strong>union of every connected site's vocabulary,
+deduped by value</strong>:</p>
+<ul>
+<li><code>event_type</code> lists every event type across all connected sites. A mapping
+  keyed on a type that exists on only one site is fine — it simply never
+  matches events arriving from the other sites.</li>
+<li>Cascades tolerate per-site differences: asking for the fields of an event
+  type that one site doesn't define skips that site and returns the fields
+  from the site(s) that do.</li>
+<li>If two sites define the same slug with different display names, the first
+  provider's label is shown (cosmetic only — the stored value is always the
+  slug). If they define the same slug with <em>different schemas</em>, the field and
+  value lists are the union of both definitions.</li>
+</ul>
+<h2 id="scaffolding-mappings-cli-alternative">Scaffolding mappings (CLI alternative)<a class="headerlink" href="#scaffolding-mappings-cli-alternative" title="Permanent link">&para;</a></h2>
 <p>The repo ships a CLI that <strong>generates</strong> an <code>event_type_to_tag</code> mapping from a
 live ER event type + the CMORE tag schema, so you fill in only the genuine
 decisions instead of authoring everything by hand:</p>
