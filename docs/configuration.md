@@ -59,7 +59,7 @@ Per the CMORE field's data type:
 - **String / Text** — sent as-is.
 
 > Authoring these mappings by hand is tedious for tag-heavy event types. Use
-> the [scaffold tool](#scaffolding-mappings) to generate most of it.
+> the [scaffold tool](#scaffolding-mappings-cli-alternative) to generate most of it.
 
 ### Subject affiliation & classification (for GPS tracks)
 
