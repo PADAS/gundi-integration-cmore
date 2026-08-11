@@ -15,8 +15,13 @@ jobs:
         run: python -m ensurepip --upgrade
       - name: Install pip tools
         # typing_extensions listed explicitly: pip-tools 7.6.0 imports it on
-        # Python 3.10 without declaring it as a dependency
-        run: pip install pip-tools typing_extensions
+        # Python 3.10 without declaring it as a dependency.
+        # pip pinned <26: pip-tools 7.6.0 (latest as of 2026-08) calls pip
+        # internals that changed in pip 26 (make_requirement_preparer grew a
+        # required allow_editables kwarg) — the 2026-08-10 runner image ships
+        # pip 26, crashing pip-compile before tests run. Unpin once pip-tools
+        # releases pip-26 support.
+        run: pip install "pip<26" pip-tools typing_extensions
       - name: Install compile dependencies
         run: pip-compile --output-file=requirements.txt requirements-base.in requirements-dev.in requirements.in
       - name: Install dependencies
