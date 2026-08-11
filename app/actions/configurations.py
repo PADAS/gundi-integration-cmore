@@ -207,14 +207,20 @@ class SubjectClassificationMapping(pydantic.BaseModel):
     )
 
 
-def _reference(action: str, params: Optional[dict] = None) -> dict:
+def _reference(action: str, params: Optional[dict] = None, *, target: str = "self") -> dict:
     """Build a gundi:reference ui_schema annotation (spec: docs/superpowers/
     specs/2026-07-31-reference-data-config-ui-design.md §2). Deliberately
     does NOT set ui:widget — portals without reference support must keep
-    rendering plain text fields."""
+    rendering plain text fields.
+
+    ``target="provider"`` directs the portal to fetch from the provider
+    integration(s) of the connection instead of this integration — used for
+    the EarthRanger-side vocabulary (event types, field keys, field values),
+    whose reference actions live on the ER runner (Phase 2 of the spec).
+    """
     return {
         "action": action,
-        "target": "self",
+        "target": target,
         "params": params or {},
         "allow_free_text": True,
     }
@@ -352,6 +358,27 @@ class DeliverConfig(PushActionConfiguration):
                 "tag_name": {"$data": "../../../../tag_name"},
                 "field_name": {"$data": "../../cmore_field_name"},
             },
+        )
+        # Source-side (EarthRanger) vocabulary — served by the ER runner's
+        # reference actions via target="provider". $data paths mirror the
+        # self-target siblings above: event_type sits next to tag_name,
+        # event_details_key next to cmore_field_name, from_value next to
+        # to_value.
+        event_items["event_type"]["gundi:reference"] = _reference(
+            "list_event_types", target="provider"
+        )
+        field_items["event_details_key"]["gundi:reference"] = _reference(
+            "list_event_type_fields",
+            {"event_type": {"$data": "../../event_type"}},
+            target="provider",
+        )
+        value_items["from_value"]["gundi:reference"] = _reference(
+            "list_event_field_values",
+            {
+                "event_type": {"$data": "../../../../event_type"},
+                "field_key": {"$data": "../../event_details_key"},
+            },
+            target="provider",
         )
         classification_items = base["subject_type_to_classification"]["items"]
         classification_items["battleDimension"]["gundi:reference"] = _reference(
