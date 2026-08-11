@@ -41,7 +41,7 @@ CMORE field 'Rhino Spesies' (Lookup) has no option matching 'Black Rhino'; dropp
 The source value didn't resolve to a valid CMORE option. Add a **value mapping**
 (`source value → CMORE value`) for that field, e.g. `Black Rhino → Black`. See
 [Configuration → value resolution](configuration.md#how-field-values-are-resolved).
-The [`scaffold-mapping`](configuration.md#scaffolding-mappings) tool surfaces
+The [`scaffold-mapping`](configuration.md#scaffolding-mappings-cli-alternative) tool surfaces
 these to fill in.
 
 ## Nothing reaches the runner at all

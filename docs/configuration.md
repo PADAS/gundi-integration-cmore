@@ -59,7 +59,7 @@ Per the CMORE field's data type:
 - **String / Text** — sent as-is.
 
 > Authoring these mappings by hand is tedious for tag-heavy event types. Use
-> the [scaffold tool](#scaffolding-mappings) to generate most of it.
+> the [scaffold tool](#scaffolding-mappings-cli-alternative) to generate most of it.
 
 ### Subject affiliation & classification (for GPS tracks)
 
@@ -113,7 +113,51 @@ persist.
 
 ---
 
-## Scaffolding mappings
+## Reference dropdowns in the portal
+
+The Deliver mapping form's pick-a-value fields render as **live dropdowns** in
+the Gundi portal (combobox with free-text entry). Options are fetched on
+demand — when you open a dropdown, never on page load — through the
+integrations' *reference actions*:
+
+- **CMORE-side fields** (`tag_name`, `cmore_field_name`, `to_value`, and the
+  classification fields) list live values from **this CMORE instance**: tag
+  names, a tag's fields, a field's allowed options, and the classification
+  tree.
+- **EarthRanger-side fields** (`event_type`, `event_details_key`,
+  `from_value`) list live values from the **connected EarthRanger
+  provider(s)**: event types (grouped by category), an event type's fields,
+  and a choice field's values. Only **v2** ER event types are offered — see
+  the ER runner's
+  [reference actions](https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/)
+  docs for details; classic v1 types can still be typed manually.
+
+Dropdowns cascade: picking a `tag_name` scopes the `cmore_field_name` list to
+that tag's fields; picking an `event_type` scopes `event_details_key`, and so
+on. Every field stays usable no matter what: while a parent value is empty, or
+if a fetch fails or nothing offers options, the field is a plain free-text
+input (with a retry link on failure). A saved value that's no longer among the
+fetched options gets a warning badge but is **never** changed automatically.
+
+### Multiple EarthRanger providers on one CMORE destination
+
+A CMORE integration's Deliver config is shared by **all** of its connections,
+so when several ER providers deliver into the same CMORE integration, the
+ER-side dropdowns show the **union of every connected site's vocabulary,
+deduped by value**:
+
+- `event_type` lists every event type across all connected sites. A mapping
+  keyed on a type that exists on only one site is fine — it simply never
+  matches events arriving from the other sites.
+- Cascades tolerate per-site differences: asking for the fields of an event
+  type that one site doesn't define skips that site and returns the fields
+  from the site(s) that do.
+- If two sites define the same slug with different display names, the first
+  provider's label is shown (cosmetic only — the stored value is always the
+  slug). If they define the same slug with *different schemas*, the field and
+  value lists are the union of both definitions.
+
+## Scaffolding mappings (CLI alternative)
 
 The repo ships a CLI that **generates** an `event_type_to_tag` mapping from a
 live ER event type + the CMORE tag schema, so you fill in only the genuine
