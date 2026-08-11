@@ -246,7 +246,7 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
 > **Shortcut for many fields:** authoring mappings by hand gets tedious for
 > tag-heavy event types (CMORE's Rhino Carcass tag has 26 fields). Your
 > integration engineer can generate a mapping automatically with the
-> `scaffold-mapping` tool — see [Configuration](configuration.md#scaffolding-mappings).
+> `scaffold-mapping` tool — see [Configuration](configuration.md#scaffolding-mappings-cli-alternative).
 
 ## Part 3: Connect EarthRanger and choose what to share
 
