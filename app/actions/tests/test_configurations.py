@@ -60,19 +60,38 @@ def test_gundi_reference_annotations_match_registered_reference_actions():
     found = []
     _collect_gundi_references(DeliverConfig.ui_schema(), found)
 
-    annotated_actions = {ref["action"] for _, ref in found}
-    assert annotated_actions == {
+    self_refs = [(node, ref) for node, ref in found if ref["target"] == "self"]
+    provider_refs = [(node, ref) for node, ref in found if ref["target"] == "provider"]
+    assert {ref["target"] for _, ref in found} <= {"self", "provider"}
+
+    assert {ref["action"] for _, ref in self_refs} == {
         "list_tag_names",
         "list_tag_fields",
         "list_field_options",
         "list_classification_values",
     }
+    # Provider-target actions live on the EarthRanger runner (Phase 2); their
+    # query models can't be validated here, so pin the contract by name+params
+    # against gundi-integration-earthranger's registered actions instead.
+    assert {ref["action"] for _, ref in provider_refs} == {
+        "list_event_types",
+        "list_event_type_fields",
+        "list_event_field_values",
+    }
+    provider_params_by_action = {
+        ref["action"]: set(ref.get("params", {})) for _, ref in provider_refs
+    }
+    assert provider_params_by_action == {
+        "list_event_types": set(),
+        "list_event_type_fields": {"event_type"},
+        "list_event_field_values": {"event_type", "field_key"},
+    }
 
     for host_node, ref in found:
         assert "ui:widget" not in host_node, ref["action"]
-        assert ref["target"] == "self"
         assert ref["allow_free_text"] is True
 
+    for host_node, ref in self_refs:
         _, config_model, _ = handlers[ref["action"]]
         assert issubclass(config_model, ReferenceActionConfiguration)
 
