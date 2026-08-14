@@ -89,7 +89,18 @@ def test_gundi_reference_annotations_match_registered_reference_actions():
         "list_event_field_values": {"event_type", "field_key"},
     }
 
-    # Both subject-mapping lists offer the same provider-side vocabulary.
+    # Both subject-mapping lists offer the same provider-side vocabulary,
+    # each annotated on its own subject_type item field. Assert the exact
+    # ui_schema paths (so a misplaced annotation can't hide behind the
+    # count) and keep the count guard against extra copies elsewhere.
+    ui = DeliverConfig.ui_schema()
+    for list_field in (
+        "subject_type_to_affiliation",
+        "subject_type_to_classification",
+    ):
+        ref = ui[list_field]["items"]["subject_type"]["gundi:reference"]
+        assert ref["action"] == "list_subject_types", list_field
+        assert ref["target"] == "provider", list_field
     subject_type_hosts = [
         node for node, ref in provider_refs if ref["action"] == "list_subject_types"
     ]
