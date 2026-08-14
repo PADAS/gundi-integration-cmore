@@ -141,7 +141,7 @@ the Gundi portal (combobox with free-text entry). Options are fetched on
 demand — when you open a dropdown, never on page load — through the
 integrations' *reference actions*:
 
-- **CMORE-side fields** (`tag_name`, `cmore_field_name`, `to_value`, and the
+- **CMORE-side fields** (`tag`, `cmore_field`, `to_value`, and the
   classification fields) list live values from **this CMORE instance**: tag
   names, a tag's fields, a field's allowed options, and the classification
   tree.
@@ -153,7 +153,7 @@ integrations' *reference actions*:
   [reference actions](https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/)
   docs for details; classic v1 types can still be typed manually.
 
-Dropdowns cascade: picking a `tag_name` scopes the `cmore_field_name` list to
+Dropdowns cascade: picking a `tag` scopes the `cmore_field` list to
 that tag's fields; picking an `event_type` scopes `event_details_key`, and so
 on. Every field stays usable no matter what: while a parent value is empty, or
 if a fetch fails or nothing offers options, the field is a plain free-text
