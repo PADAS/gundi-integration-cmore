@@ -98,7 +98,7 @@ class CmoreValueMapping(pydantic.BaseModel):
 
 
 class CmoreFieldMapping(pydantic.BaseModel):
-    """One Gundi event_details key → one CMORE field name (within a tag)."""
+    """One Gundi event_details key → one CMORE field (by id or name, within a tag)."""
 
     event_details_key: str = FieldWithUIOptions(
         ...,
@@ -149,8 +149,8 @@ class CmoreTagMapping(pydantic.BaseModel):
         default_factory=list,
         title="Field Mappings",
         description=(
-            "Map Gundi event_details keys to CMORE field names within the "
-            "chosen tag. Values are coerced per the CMORE field's data type: "
+            "Map Gundi event_details keys to CMORE fields (by id or name) "
+            "within the chosen tag. Values are coerced per the CMORE field's data type: "
             "Lookup/FixedLookup values are resolved to a valid option (using "
             "the optional value mappings, then a case/punctuation-insensitive "
             "match); Number/Boolean values are validated; everything else is "

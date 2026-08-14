@@ -192,6 +192,14 @@ def test_resolve_field_by_id_and_by_name():
     assert poacher.resolve_field("Nope") is None
 
 
+def test_resolve_exotic_digit_ref_degrades_to_name_lookup():
+    """'²'.isdigit() is True but int('²') raises — such a ref must fall
+    through to (failed) name lookup, never crash resolution."""
+    index = _build_index(_sample_response())
+    assert index.resolve("²") is None
+    assert index.resolve("Poacher Sighting").resolve_field("²") is None
+
+
 def test_by_id_keeps_both_tags_on_name_collision():
     response = [
         {"name": "DomainA", "tags": [

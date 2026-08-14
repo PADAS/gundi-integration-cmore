@@ -35,7 +35,7 @@ def _resolve(ref, by_id: dict, by_name: dict):
     as long as no tag *has* id 8443; if both exist, the id wins (documented
     precedence — deterministic, and the pathological case is operator error)."""
     ref = str(ref).strip()
-    if ref.isdigit() and int(ref) in by_id:
+    if ref.isdecimal() and int(ref) in by_id:
         return by_id[int(ref)]
     return by_name.get(ref)
 
