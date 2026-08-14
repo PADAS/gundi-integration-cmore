@@ -339,36 +339,26 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
 
 
 def test_tag_picker_default_resolves_id_or_name_ref():
-    """Pins scaffold_mapping's tag-picker default-resolution logic (the
-    ``existing_ref = (existing_entry or {}).get("tag"); existing_tag =
-    index.resolve(str(existing_ref)) ...; default=existing_tag.name if
-    existing_tag else None`` snippet at the top of the interactive tag-picker
-    branch). Driving the full CLI command through this branch would require
-    mocking a live Gundi connection (existing_entry is only populated via
-    --connection, which no test in this file exercises), so this test instead
-    reproduces the exact snippet against a real TagIndexData built the same
-    way scaffold_mapping builds one (_build_index), covering both an ID ref
-    and a name ref plus the no-existing-entry case."""
+    """scaffold_mapping pre-selects the tag picker's default via
+    _default_tag_name — the production helper is exercised directly, against
+    a real TagIndexData built the same way scaffold_mapping builds one."""
+    from app.datasource.cli import _default_tag_name
     from app.datasource.tag_index import _build_index
 
     index = _build_index(_TAGS)
 
     # ID ref (what the portal dropdown would store) resolves to the tag name.
-    existing_entry = {"tag": "26"}
-    existing_ref = (existing_entry or {}).get("tag")
-    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
-    assert (existing_tag.name if existing_tag else None) == "Rhino Carcass"
+    assert _default_tag_name(index, {"tag": "26"}) == "Rhino Carcass"
 
     # Name ref resolves to itself.
-    existing_entry = {"tag": "Rhino Carcass"}
-    existing_ref = (existing_entry or {}).get("tag")
-    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
-    assert (existing_tag.name if existing_tag else None) == "Rhino Carcass"
+    assert _default_tag_name(index, {"tag": "Rhino Carcass"}) == "Rhino Carcass"
 
     # No existing entry → no default.
-    existing_ref = (None or {}).get("tag")
-    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
-    assert (existing_tag.name if existing_tag else None) is None
+    assert _default_tag_name(index, None) is None
+
+    # A ref that no longer resolves (tag deleted/renamed away) → no default.
+    assert _default_tag_name(index, {"tag": "9999"}) is None
+    assert _default_tag_name(index, {"tag": "No Such Tag"}) is None
 
 
 def test_ensure_scheme_prepends_https_when_missing():

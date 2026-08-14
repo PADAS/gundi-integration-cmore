@@ -283,6 +283,15 @@ def _find_action_config(integration, action_values):
     return None, {}
 
 
+def _default_tag_name(index, existing_entry):
+    """Resolve an existing mapping entry's ``tag`` ref (id or name) to the
+    tag's display name, for pre-selection in the tag picker. Returns None
+    when there is no existing entry or the ref no longer resolves."""
+    existing_ref = (existing_entry or {}).get("tag")
+    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
+    return existing_tag.name if existing_tag else None
+
+
 def merge_event_type_mapping(deliver_data: dict, entry: dict) -> dict:
     """Merge one CmoreTagMapping ``entry`` into a DeliverConfig's
     ``event_type_to_tag`` list, replacing any existing entry for the same
@@ -583,13 +592,11 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if not resolved_tag:
             # Pick the CMORE tag from a menu (arrow-key on a TTY) rather than
             # making the operator type the exact name.
-            existing_ref = (existing_entry or {}).get("tag")
-            existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
             titles = [f"{name}  ({index.by_name[name].domain})" for name in sorted(index.by_name)]
             resolved_tag = await _choose(
                 f"Select the CMORE tag to map '{event_type}' events to:",
                 sorted(index.by_name), titles=titles, skip_label=None,
-                default=existing_tag.name if existing_tag else None,
+                default=_default_tag_name(index, existing_entry),
             )
         tag_info = index.resolve(str(resolved_tag)) if resolved_tag else None
         if tag_info is None:
