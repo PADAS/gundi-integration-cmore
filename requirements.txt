@@ -94,7 +94,9 @@ h11==0.14.0
 httpcore==1.0.8
     # via httpx
 httpx==0.28.1
-    # via gundi-client-v2
+    # via
+    #   -r requirements-base.in
+    #   gundi-client-v2
 idna==3.7
     # via
     #   anyio

@@ -6,6 +6,11 @@ fastapi~=0.103.2
 uvicorn~=0.23.2
 gundi-core~=1.12.0
 gundi-client-v2~=3.3.0
+# httpx is imported directly by app/services/* so it must be declared here
+# (template parity). Unlike the template's ~=0.24.1 pin (tied to
+# gundi-client-v2 2.4.0), this repo runs gundi-client-v2 3.3.0 on httpx 0.28
+# and the TestClient-based suite is green there.
+httpx~=0.28.1
 stamina~=23.2.0
 redis~=5.0.1
 gcloud-aio-pubsub~=6.0.0
