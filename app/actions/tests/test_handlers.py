@@ -106,15 +106,15 @@ def fake_tag_info():
     """Stand-in TagInfo a tag_index.get mock can return."""
     from app.datasource.tag_index import FieldInfo, TagInfo
 
-    return TagInfo(
+    return TagInfo.build(
         id=42,
         name="Wildlife Sighting",
         domain="Wildlife",
         type_limiter="Incident",
-        fields={
-            "Species": FieldInfo(id=101, name="Species", data_type="String"),
-            "Count": FieldInfo(id=102, name="Count", data_type="Number"),
-        },
+        fields=[
+            FieldInfo(id=101, name="Species", data_type="String"),
+            FieldInfo(id=102, name="Count", data_type="Number"),
+        ],
     )
 
 
@@ -451,21 +451,21 @@ def rhino_carcass_tag_info():
     """Trimmed CMORE 'Rhino Carcass' tag mirroring the real Wildlife domain."""
     from app.datasource.tag_index import TagInfo
 
-    return TagInfo(
+    return TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={
-            "Rhino Spesies": FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
-                                       lookups=_lookup("White", "Black")),
-            "Animal Sex": FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
-                                    lookups=_lookup("Male", "Female", "Indeterminable")),
-            "Animal Age": FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
-                                    lookups=_lookup("Adult", "Sub-Adult", "Calf")),
-            "Carcass Age": FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
-                                     lookups=_lookup("Today", "Fresh (less than 3 days)")),
-            "Kill Type": FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
-                                   lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
-            "Skull Tag Number": FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
-        },
+        fields=[
+            FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
+                      lookups=_lookup("White", "Black")),
+            FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                      lookups=_lookup("Male", "Female", "Indeterminable")),
+            FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                      lookups=_lookup("Adult", "Sub-Adult", "Calf")),
+            FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
+                      lookups=_lookup("Today", "Fresh (less than 3 days)")),
+            FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
+                      lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
+            FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
+        ],
     )
 
 

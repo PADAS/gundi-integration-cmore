@@ -49,7 +49,7 @@ def suggest_cmore_field(
     """Best CMORE field for an ER field, or (None, best_score) below threshold."""
     best: Optional[FieldInfo] = None
     best_score = 0.0
-    for cmore_field in tag_info.fields.values():
+    for cmore_field in tag_info.fields_by_name.values():
         score = field_match_score(er_field, cmore_field)
         if score > best_score:
             best, best_score = cmore_field, score
@@ -153,6 +153,6 @@ def build_scaffold(
         result.fields.append(scaffold)
 
     result.uncovered_cmore_fields = [
-        name for name in tag_info.fields if name not in matched_cmore_names
+        name for name in tag_info.fields_by_name if name not in matched_cmore_names
     ]
     return result

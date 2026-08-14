@@ -70,15 +70,16 @@ def _sample_response():
 def test_build_index_flattens_across_domains():
     index = _build_index(_sample_response())
 
-    assert set(index) == {"Poacher Sighting", "test tag"}
+    assert set(index.by_name) == {"Poacher Sighting", "test tag"}
 
-    poacher = index["Poacher Sighting"]
+    poacher = index.by_name["Poacher Sighting"]
     assert poacher.id == 29
     assert poacher.domain == "Wildlife"
     assert poacher.type_limiter == "Incident"
-    assert set(poacher.fields) == {"Direction", "Number of People"}
+    assert set(poacher.fields_by_name) == {"Direction", "Number of People"}
+    assert index.by_id[29] is poacher
 
-    direction = poacher.field_by_name("Direction")
+    direction = poacher.resolve_field("Direction")
     assert direction is not None
     assert direction.id == 1327
     assert direction.data_type == "Lookup"
@@ -86,8 +87,8 @@ def test_build_index_flattens_across_domains():
 
 
 def test_build_index_handles_empty_response():
-    assert _build_index([]) == {}
-    assert _build_index(None) == {}
+    assert _build_index([]).by_id == {} and _build_index([]).by_name == {}
+    assert _build_index(None).by_id == {} and _build_index(None).by_name == {}
 
 
 def test_build_index_skips_tags_with_no_name():
@@ -97,7 +98,8 @@ def test_build_index_skips_tags_with_no_name():
             "tags": [{"id": 1, "name": "", "typeLimiter": "Incident", "fields": []}],
         }
     ]
-    assert _build_index(response) == {}
+    assert _build_index(response).by_name == {}
+    assert _build_index(response).by_id == {}
 
 
 def test_build_index_skips_fields_with_no_name():
@@ -118,7 +120,7 @@ def test_build_index_skips_fields_with_no_name():
         }
     ]
     index = _build_index(response)
-    assert set(index["Tag1"].fields) == {"Known"}
+    assert set(index.by_name["Tag1"].fields_by_name) == {"Known"}
 
 
 def test_build_index_warns_on_tag_name_collision(caplog):
@@ -140,12 +142,69 @@ def test_build_index_warns_on_tag_name_collision(caplog):
         index = _build_index(response)
 
     # Last-wins
-    assert index["Collision"].id == 2
-    assert index["Collision"].domain == "DomainB"
+    assert index.by_name["Collision"].id == 2
+    assert index.by_name["Collision"].domain == "DomainB"
     assert any(
         "collision" in r.message.lower() and "DomainA" in r.message and "DomainB" in r.message
         for r in caplog.records
     )
+
+
+# ----- ID-or-name resolution -----
+
+
+def test_resolve_by_id_and_by_name():
+    index = _build_index(_sample_response())
+    assert index.resolve("29").name == "Poacher Sighting"
+    assert index.resolve(" 29 ").name == "Poacher Sighting"  # whitespace stripped
+    assert index.resolve("Poacher Sighting").id == 29
+    assert index.resolve("9999") is None
+    assert index.resolve("Not A Real Tag") is None
+
+
+def test_resolve_digit_ref_with_no_matching_id_falls_back_to_name():
+    response = [
+        {"name": "X", "tags": [
+            {"id": 5, "name": "8443", "typeLimiter": "Incident", "fields": []},
+        ]},
+    ]
+    index = _build_index(response)
+    assert index.resolve("8443").id == 5  # no tag has id 8443 → name match
+
+
+def test_resolve_id_beats_all_digit_name():
+    response = [
+        {"name": "X", "tags": [
+            {"id": 7, "name": "8443", "typeLimiter": "Incident", "fields": []},
+            {"id": 8443, "name": "Real Tag", "typeLimiter": "Incident", "fields": []},
+        ]},
+    ]
+    index = _build_index(response)
+    assert index.resolve("8443").name == "Real Tag"  # documented precedence
+    assert index.resolve("7").name == "8443"          # the digit-named tag via its own id
+
+
+def test_resolve_field_by_id_and_by_name():
+    poacher = _build_index(_sample_response()).resolve("Poacher Sighting")
+    assert poacher.resolve_field("1327").name == "Direction"
+    assert poacher.resolve_field("Direction").id == 1327
+    assert poacher.resolve_field("9999") is None
+    assert poacher.resolve_field("Nope") is None
+
+
+def test_by_id_keeps_both_tags_on_name_collision():
+    response = [
+        {"name": "DomainA", "tags": [
+            {"id": 1, "name": "Collision", "typeLimiter": "Incident", "fields": []},
+        ]},
+        {"name": "DomainB", "tags": [
+            {"id": 2, "name": "Collision", "typeLimiter": "Incident", "fields": []},
+        ]},
+    ]
+    index = _build_index(response)
+    assert index.resolve("1").domain == "DomainA"   # both reachable by id
+    assert index.resolve("2").domain == "DomainB"
+    assert index.resolve("Collision").id == 2       # name view stays last-wins
 
 
 # ----- TagIndex -----
@@ -166,7 +225,8 @@ async def test_tag_index_get_returns_tag_info():
     tag = await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
     assert tag is not None
     assert tag.id == 29
-    assert tag.fields["Direction"].id == 1327
+    assert tag.fields_by_name["Direction"].id == 1327
+    assert (await idx.get(client, "https://example/api", "int-1", "29")).id == 29
 
 
 @pytest.mark.asyncio

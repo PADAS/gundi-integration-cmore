@@ -26,7 +26,7 @@ from app.datasource.schemas import (
     CmoreVirtualClientRequest,
     UploadType,
 )
-from app.datasource.tag_index import tag_index, _build_index
+from app.datasource.tag_index import TagIndexData, tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
@@ -74,7 +74,7 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     return {"valid_credentials": True}
 
 
-async def _fetch_tag_index(integration: Integration) -> dict:
+async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     """Fresh tag fetch for reference actions (config-time UX).
 
     Deliberately bypasses the module-level tag_index cache: that cache is
@@ -96,7 +96,7 @@ async def action_list_tag_names(
     index = await _fetch_tag_index(integration)
     options = [
         ReferenceOption(value=tag.name, group=tag.domain)
-        for tag in index.values()
+        for tag in index.by_name.values()
     ]
     options.sort(key=lambda o: (o.group or "", o.value))
     return ReferenceDataResponse(options=options).dict()
@@ -107,14 +107,14 @@ async def action_list_tag_fields(
 ):
     """Reference action: field names within one CMORE tag."""
     index = await _fetch_tag_index(integration)
-    tag = index.get(action_config.tag_name)
+    tag = index.by_name.get(action_config.tag_name)
     if tag is None:
         raise ValueError(
             f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
         )
     options = [
         ReferenceOption(value=f.name, description=f.data_type)
-        for f in tag.fields.values()
+        for f in tag.fields_by_name.values()
     ]
     return ReferenceDataResponse(options=options).dict()
 
@@ -128,12 +128,12 @@ async def action_list_field_options(
     free-text in CMORE, so there is nothing to suggest.
     """
     index = await _fetch_tag_index(integration)
-    tag = index.get(action_config.tag_name)
+    tag = index.by_name.get(action_config.tag_name)
     if tag is None:
         raise ValueError(
             f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
         )
-    field_info = tag.field_by_name(action_config.field_name)
+    field_info = tag.resolve_field(action_config.field_name)
     if field_info is None:
         raise ValueError(
             f"Unknown field {action_config.field_name!r} in CMORE tag "
@@ -522,7 +522,7 @@ async def _build_event_tag(
     for fm in (mapping.field_mappings or []):
         ed_key = fm.event_details_key
         field_name = fm.cmore_field_name
-        field_info = tag_info.field_by_name(field_name)
+        field_info = tag_info.resolve_field(field_name)
         if field_info is None:
             logger.warning(
                 "CMORE tag %r has no field %r; skipping event_details key %r.",

@@ -423,7 +423,7 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
     for er_key in list(result.unmatched_er_fields):
         if not uncovered:
             break
-        titles = [f"{n}  ({tag_info.field_by_name(n).data_type})" for n in uncovered]
+        titles = [f"{n}  ({tag_info.resolve_field(n).data_type})" for n in uncovered]
         name = await _choose(
             f"\nER field '{er_key}' has no CMORE match — pick a CMORE field:",
             uncovered, titles=titles, skip_label="— skip this field —",
@@ -435,7 +435,7 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
         result.unmatched_er_fields.remove(er_key)
         scaffold = FieldScaffold(event_details_key=er_key, cmore_field_name=name)
         # Seed value mappings for a newly-wired lookup field from its ER choices.
-        field_info = tag_info.field_by_name(name)
+        field_info = tag_info.resolve_field(name)
         er_field = er_by_key.get(er_key)
         if field_info.data_type in LOOKUP_TYPES and er_field and er_field.choices:
             for choice in er_field.choices:
@@ -454,7 +454,7 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
     fi = 0
     while 0 <= fi < len(nav_fields):
         fs = nav_fields[fi]
-        field_info = tag_info.field_by_name(fs.cmore_field_name)
+        field_info = tag_info.resolve_field(fs.cmore_field_name)
         options = _lookup_options(field_info)
         er_field = er_by_key.get(fs.event_details_key)
         displays = {c.value: c.display for c in (er_field.choices or [])} if er_field else {}
@@ -495,7 +495,7 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
 @click.option("--gundi-password", envvar="GUNDI_PASSWORD", help="Gundi password (prompted if omitted).")
 @click.option("--connection", help="Gundi connection id (provider=ER, destination=CMORE).")
 @click.option("--event-type", required=True, help="ER event_type value (slug), e.g. rhino_carcass.")
-@click.option("--tag", "tag_name", default=None, help="CMORE tag name. Prompted if omitted.")
+@click.option("--tag", "tag_name", default=None, help="CMORE tag id or exact tag name. Prompted if omitted.")
 @click.option("--er-schema-file", type=click.Path(exists=True), help="Offline: ER event-type schema JSON.")
 @click.option("--tags-file", type=click.Path(exists=True), help="Offline: CMORE get-tags JSON.")
 @click.option("--out", type=click.Path(), default=None, help="Write the config entry to this file.")
@@ -578,13 +578,13 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if not resolved_tag:
             # Pick the CMORE tag from a menu (arrow-key on a TTY) rather than
             # making the operator type the exact name.
-            titles = [f"{name}  ({index[name].domain})" for name in sorted(index)]
+            titles = [f"{name}  ({index.by_name[name].domain})" for name in sorted(index.by_name)]
             resolved_tag = await _choose(
                 f"Select the CMORE tag to map '{event_type}' events to:",
-                sorted(index), titles=titles, skip_label=None,
+                sorted(index.by_name), titles=titles, skip_label=None,
                 default=(existing_entry or {}).get("tag_name"),
             )
-        tag_info = index.get(resolved_tag) if resolved_tag else None
+        tag_info = index.resolve(str(resolved_tag)) if resolved_tag else None
         if tag_info is None:
             raise click.UsageError(f"CMORE tag {resolved_tag!r} not found in the tag schema.")
 

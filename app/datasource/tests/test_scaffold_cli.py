@@ -185,12 +185,12 @@ async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
     mocker.patch("sys.stdin.isatty", return_value=False)        # numbered fallback
     mocker.patch.object(cli_module.click, "prompt", return_value="")  # Enter = keep default
 
-    tag_info = TagInfo(
+    tag_info = TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={"Animal Age": FieldInfo(
+        fields=[FieldInfo(
             id=1260, name="Animal Age", data_type="Lookup",
             lookups=[{"id": 1, "value": "Adult"}, {"id": 2, "value": "Sub-Adult"}, {"id": 3, "value": "Calf"}],
-        )},
+        )],
     )
     er_fields = [ERField("age_of_animal", "Age Of Animal",
                          [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]

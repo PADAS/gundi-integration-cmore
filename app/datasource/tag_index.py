@@ -1,4 +1,4 @@
-"""Cached lookup of CMORE tags + fields by name.
+"""Cached lookup of CMORE tags + fields by id or name.
 
 CMORE's tag schema is per-instance (operators define tag domains, tags, and
 fields in the CMORE admin UI). Action runners need to map Gundi event_type and
@@ -28,61 +28,101 @@ class FieldInfo:
     lookups: List[dict] = field(default_factory=list)
 
 
+def _resolve(ref, by_id: dict, by_name: dict):
+    """Shared ID-or-name resolution: an all-digit ref matching an existing
+    id wins; anything else (or a digit ref matching no id) is an exact name
+    match. A tag literally *named* "8443" still resolves via the name branch
+    as long as no tag *has* id 8443; if both exist, the id wins (documented
+    precedence — deterministic, and the pathological case is operator error)."""
+    ref = str(ref).strip()
+    if ref.isdigit() and int(ref) in by_id:
+        return by_id[int(ref)]
+    return by_name.get(ref)
+
+
 @dataclass
 class TagInfo:
     id: int
     name: str
     domain: str
     type_limiter: str
-    fields: Dict[str, FieldInfo] = field(default_factory=dict)
+    fields_by_id: Dict[int, "FieldInfo"] = field(default_factory=dict)
+    fields_by_name: Dict[str, "FieldInfo"] = field(default_factory=dict)
 
-    def field_by_name(self, field_name: str) -> Optional[FieldInfo]:
-        return self.fields.get(field_name)
+    @classmethod
+    def build(cls, *, id, name, domain="", type_limiter="", fields=()):
+        """Construct with both field views derived from one field list, so
+        they can never drift apart."""
+        fields = list(fields)
+        return cls(
+            id=id,
+            name=name,
+            domain=domain,
+            type_limiter=type_limiter,
+            fields_by_id={f.id: f for f in fields},
+            fields_by_name={f.name: f for f in fields},
+        )
+
+    def resolve_field(self, ref: str) -> Optional["FieldInfo"]:
+        return _resolve(ref, self.fields_by_id, self.fields_by_name)
 
 
-def _build_index(raw_response: list) -> Dict[str, TagInfo]:
-    """Flatten CMORE's get_tags() response into {tag_name: TagInfo}.
+@dataclass
+class TagIndexData:
+    """Both views of one CMORE tag schema fetch. by_id is complete; by_name
+    is last-wins on cross-domain name collisions (warned at build time)."""
+
+    by_id: Dict[int, TagInfo]
+    by_name: Dict[str, TagInfo]
+
+    def resolve(self, ref: str) -> Optional[TagInfo]:
+        return _resolve(ref, self.by_id, self.by_name)
+
+
+def _build_index(raw_response: list) -> TagIndexData:
+    """Flatten CMORE's get_tags() response into a TagIndexData.
 
     The response is `[TagDomain, ...]`; each domain has a list of tags; each
-    tag has a list of fields. We flatten across domains and index by tag name.
-    Logs a warning if tag names collide across domains — last-wins.
+    tag has a list of fields. Logs a warning if tag names collide across
+    domains — last-wins in the name view; the id view keeps both.
     """
-    index: Dict[str, TagInfo] = {}
+    by_id: Dict[int, TagInfo] = {}
+    by_name: Dict[str, TagInfo] = {}
     for domain in raw_response or []:
         domain_name = domain.get("name", "")
         for tag in domain.get("tags", []) or []:
             tag_name = tag.get("name")
             if not tag_name:
                 continue
-            fields: Dict[str, FieldInfo] = {}
-            for f in tag.get("fields", []) or []:
-                f_name = f.get("name")
-                if not f_name:
-                    continue
-                fields[f_name] = FieldInfo(
+            fields = [
+                FieldInfo(
                     id=f["id"],
-                    name=f_name,
+                    name=f["name"],
                     data_type=f.get("dataType", "String"),
                     allow_multiple=bool(f.get("allowMultipleValues", False)),
                     lookups=f.get("lookups", []) or [],
                 )
-            tag_info = TagInfo(
+                for f in tag.get("fields", []) or []
+                if f.get("name")
+            ]
+            tag_info = TagInfo.build(
                 id=tag["id"],
                 name=tag_name,
                 domain=domain_name,
                 type_limiter=tag.get("typeLimiter", ""),
                 fields=fields,
             )
-            if tag_name in index:
+            if tag_name in by_name:
                 logger.warning(
                     "CMORE tag name collision: %r appears in both domain %r "
                     "and %r. Last one wins.",
                     tag_name,
-                    index[tag_name].domain,
+                    by_name[tag_name].domain,
                     domain_name,
                 )
-            index[tag_name] = tag_info
-    return index
+            by_name[tag_name] = tag_info
+            by_id[tag_info.id] = tag_info
+    return TagIndexData(by_id=by_id, by_name=by_name)
 
 
 class TagIndex:
@@ -96,8 +136,8 @@ class TagIndex:
     """
 
     def __init__(self) -> None:
-        # Key: (base_url, integration_id) → {tag_name: TagInfo}
-        self._cache: Dict[tuple, Dict[str, TagInfo]] = {}
+        # Key: (base_url, integration_id) → TagIndexData
+        self._cache: Dict[tuple, TagIndexData] = {}
         self._lock = asyncio.Lock()
 
     async def get(
@@ -105,15 +145,15 @@ class TagIndex:
         client: CmoreClient,
         base_url: str,
         integration_id: str,
-        tag_name: str,
+        tag_ref: str,
     ) -> Optional[TagInfo]:
-        """Resolve a tag by name for the given integration's CMORE view."""
+        """Resolve a tag by id or name for the given integration's CMORE view."""
         index = await self._ensure_loaded(client, base_url, integration_id)
-        return index.get(tag_name)
+        return index.resolve(tag_ref)
 
     async def _ensure_loaded(
         self, client: CmoreClient, base_url: str, integration_id: str
-    ) -> Dict[str, TagInfo]:
+    ) -> TagIndexData:
         key = (base_url, integration_id)
         if key in self._cache:
             return self._cache[key]
@@ -129,7 +169,7 @@ class TagIndex:
                 "%d tags across all domains",
                 base_url,
                 integration_id,
-                len(index),
+                len(index.by_id),
             )
             self._cache[key] = index
             return index

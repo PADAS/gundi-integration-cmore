@@ -88,21 +88,21 @@ def test_parse_real_er_api_schema_inline_enum():
 
 
 def _rhino_tag():
-    return TagInfo(
+    return TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={
-            "Rhino Spesies": FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
-                                       lookups=_lookup("White", "Black")),
-            "Animal Sex": FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
-                                    lookups=_lookup("Male", "Female", "Indeterminable")),
-            "Animal Age": FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
-                                    lookups=_lookup("Adult", "Sub-Adult", "Calf")),
-            "Carcass Age": FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
-                                     lookups=_lookup("Today", "Fresh (less than 3 days)")),
-            "Kill Type": FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
-                                   lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
-            "Skull Tag Number": FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
-        },
+        fields=[
+            FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
+                      lookups=_lookup("White", "Black")),
+            FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                      lookups=_lookup("Male", "Female", "Indeterminable")),
+            FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                      lookups=_lookup("Adult", "Sub-Adult", "Calf")),
+            FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
+                      lookups=_lookup("Today", "Fresh (less than 3 days)")),
+            FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
+                      lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
+            FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
+        ],
     )
 
 
