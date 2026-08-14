@@ -21,7 +21,7 @@ from the portal — run it to verify the token works before any data flows
 | Field | Required | Description |
 |---|---|---|
 | **API Token** | yes | CMORE API token (raw value, *without* the `Token ` prefix — the client adds it). Stored as a secret. |
-| **API Base URL** | — | CMORE API base, e.g. `https://cmorewc1.chpc.ac.za/za/WebAPI/api`. Note it includes the API path, not just the host. |
+| **API Base URL** | — | CMORE API base for **your** instance: the instance's server + `/za/WebAPI/api` (e.g. `https://cmore.csir.co.za/za/WebAPI/api` on DFFE). URLs differ per CMORE deployment; note the value includes the API path, not just the host. |
 | **Owner Group ID** | yes | The CMORE **ShareGroupId** linked to this token. All events are posted to this group; it controls which CMORE users/teams can see the data. |
 
 > The token's ShareGroup must have **tag visibility** for any tags you map (a
@@ -41,6 +41,11 @@ live under the single Deliver config.
 Optional list mapping each Gundi `event_type` to a CMORE tag and its fields.
 Events whose type isn't listed still post (description + location + deep-link
 comment) but **without** a structured tag.
+
+> **Impact of an unmapped type:** untagged events show on the map but are
+> excluded from everything that relies on classification — tag-based
+> filtering and lookups, analytics, reporting, dashboards, and rule-based
+> workflows.
 
 Each entry (**CmoreTagMapping**):
 

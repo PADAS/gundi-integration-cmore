@@ -30,7 +30,9 @@ event still posts (description + location) but the tag is dropped.
   ShareGroup to the tag domain**. The API can't do this; it's portal-admin only.
 - Also confirm the configured **Tag Name** matches a real CMORE tag exactly, and
   that an `event_type_to_tag` entry exists for the event's `event_type` (an
-  unmapped type posts with no tag by design).
+  unmapped type posts with no tag by design — note that untagged events are
+  excluded from CMORE's tag-based filtering, analytics, reporting, dashboards,
+  and rule-based workflows).
 
 ## A specific lookup value is dropped
 
