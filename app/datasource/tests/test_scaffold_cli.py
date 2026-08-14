@@ -60,20 +60,20 @@ def test_find_action_config_locates_push_config():
 
 def test_merge_event_type_mapping_replaces_same_event_type():
     existing = {"event_type_to_tag": [
-        {"event_type": "rhino_carcass", "tag_name": "OLD"},
-        {"event_type": "shot", "tag_name": "Shot"},
+        {"event_type": "rhino_carcass", "tag": "OLD"},
+        {"event_type": "shot", "tag": "Shot"},
     ]}
-    entry = {"event_type": "rhino_carcass", "tag_name": "Rhino Carcass", "field_mappings": []}
+    entry = {"event_type": "rhino_carcass", "tag": "Rhino Carcass", "field_mappings": []}
     merged = merge_event_type_mapping(existing, entry)
     rhino = [m for m in merged["event_type_to_tag"] if m["event_type"] == "rhino_carcass"]
-    assert len(rhino) == 1 and rhino[0]["tag_name"] == "Rhino Carcass"
+    assert len(rhino) == 1 and rhino[0]["tag"] == "Rhino Carcass"
     # The unrelated mapping is preserved; input is not mutated.
     assert any(m["event_type"] == "shot" for m in merged["event_type_to_tag"])
-    assert existing["event_type_to_tag"][0]["tag_name"] == "OLD"
+    assert existing["event_type_to_tag"][0]["tag"] == "OLD"
 
 
 def test_merge_into_empty_deliver_data():
-    entry = {"event_type": "rhino_carcass", "tag_name": "Rhino Carcass", "field_mappings": []}
+    entry = {"event_type": "rhino_carcass", "tag": "Rhino Carcass", "field_mappings": []}
     assert merge_event_type_mapping({}, entry)["event_type_to_tag"] == [entry]
 
 
@@ -132,11 +132,12 @@ def test_interactive_picker_and_value_fill(tmp_path):
     ], input="1\n3\n2\n1\n")
     assert result.exit_code == 0, result.output
 
-    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # male/female auto-resolve (display match) → only 'unknown' mapped.
-    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    # Animal Sex=id 1, Rhino Spesies=id 2 per _INTERACTIVE_TAGS.
+    assert by_field["1"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
     # The picker wired 'species' → Rhino Spesies; both values filled by number.
-    species = by_field["Rhino Spesies"]["value_mappings"]
+    species = by_field["2"]["value_mappings"]
     assert {"from_value": "bw", "to_value": "Black"} in species
     assert {"from_value": "wt", "to_value": "White"} in species
 
@@ -185,30 +186,75 @@ async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
     mocker.patch("sys.stdin.isatty", return_value=False)        # numbered fallback
     mocker.patch.object(cli_module.click, "prompt", return_value="")  # Enter = keep default
 
-    tag_info = TagInfo(
+    tag_info = TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={"Animal Age": FieldInfo(
+        fields=[FieldInfo(
             id=1260, name="Animal Age", data_type="Lookup",
             lookups=[{"id": 1, "value": "Adult"}, {"id": 2, "value": "Sub-Adult"}, {"id": 3, "value": "Calf"}],
-        )},
+        )],
     )
     er_fields = [ERField("age_of_animal", "Age Of Animal",
                          [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
     result = ScaffoldResult(
-        event_type="rhino_carcass", tag_name="Rhino Carcass",
+        event_type="rhino_carcass", tag_name="Rhino Carcass", tag_id=26,
         fields=[FieldScaffold(
             event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            cmore_field_id=1260,
             value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
         )],
     )
     existing_entry = {"field_mappings": [{
-        "event_details_key": "age_of_animal", "cmore_field_name": "Animal Age",
+        "event_details_key": "age_of_animal", "cmore_field": "Animal Age",
         "value_mappings": [{"from_value": "b_3_months1_year", "to_value": "Calf"}],
     }]}
 
     await _interactive_fill(result, tag_info, er_fields, existing_entry)
 
     # Enter kept the existing 'Calf' mapping rather than dropping it.
+    assert result.fields[0].value_mappings == [{"from_value": "b_3_months1_year", "to_value": "Calf"}]
+
+
+@pytest.mark.asyncio
+async def test_interactive_fill_keeps_existing_mapping_as_default_with_id_ref(mocker):
+    """Same as test_interactive_fill_keeps_existing_mapping_as_default, but the
+    stored existing_entry references the CMORE field by its numeric ID (as a
+    portal dropdown would store it) rather than by name. _interactive_fill
+    must resolve the ID ref via tag_info.resolve_field() before using it as
+    the default, so behavior matches the name-ref case exactly."""
+    from app.datasource.cli import _interactive_fill
+    from app.datasource.er_schema import ERChoice, ERField
+    from app.datasource.mapping_scaffold import FieldScaffold, ScaffoldResult
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    mocker.patch("sys.stdin.isatty", return_value=False)        # numbered fallback
+    mocker.patch.object(cli_module.click, "prompt", return_value="")  # Enter = keep default
+
+    tag_info = TagInfo.build(
+        id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
+        fields=[FieldInfo(
+            id=1260, name="Animal Age", data_type="Lookup",
+            lookups=[{"id": 1, "value": "Adult"}, {"id": 2, "value": "Sub-Adult"}, {"id": 3, "value": "Calf"}],
+        )],
+    )
+    er_fields = [ERField("age_of_animal", "Age Of Animal",
+                         [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
+    result = ScaffoldResult(
+        event_type="rhino_carcass", tag_name="Rhino Carcass", tag_id=26,
+        fields=[FieldScaffold(
+            event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            cmore_field_id=1260,
+            value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
+        )],
+    )
+    existing_entry = {"field_mappings": [{
+        "event_details_key": "age_of_animal", "cmore_field": "1260",  # ID ref, not name
+        "value_mappings": [{"from_value": "b_3_months1_year", "to_value": "Calf"}],
+    }]}
+
+    await _interactive_fill(result, tag_info, er_fields, existing_entry)
+
+    # Enter kept the existing 'Calf' mapping rather than dropping it, exactly
+    # as when the ref was the field name.
     assert result.fields[0].value_mappings == [{"from_value": "b_3_months1_year", "to_value": "Calf"}]
 
 
@@ -232,10 +278,11 @@ def test_interactive_next_and_back_navigation(tmp_path):
     ], input="1\nn\nb\n3\n2\n1\n")
     assert result.exit_code == 0, result.output
 
-    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # Going back let us set Animal Sex after initially skipping it.
-    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
-    species = by_field["Rhino Spesies"]["value_mappings"]
+    # Animal Sex=id 1, Rhino Spesies=id 2 per _INTERACTIVE_TAGS.
+    assert by_field["1"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    species = by_field["2"]["value_mappings"]
     assert {"from_value": "bw", "to_value": "Black"} in species
     assert {"from_value": "wt", "to_value": "White"} in species
 
@@ -278,16 +325,40 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
 
     entry = json.loads(out_file.read_text())
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag_name"] == "Rhino Carcass"
+    assert entry["tag"] == "26"  # Rhino Carcass tag id, per _TAGS
 
-    by_field = {fm["cmore_field_name"]: fm for fm in entry["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in entry["field_mappings"]}
     # animal_sex: female/male auto-resolve (display match); only 'Unknown' is left.
-    sex_maps = by_field["Animal Sex"].get("value_mappings", [])
+    # Animal Sex=id 1261, Animal Age=id 1260 per _TAGS.
+    sex_maps = by_field["1261"].get("value_mappings", [])
     assert sex_maps == [{"from_value": "Unknown", "to_value": ""}]
     # age_of_animal: none of ER's six buckets match Adult/Calf → all blank.
-    age_maps = by_field["Animal Age"]["value_mappings"]
+    age_maps = by_field["1260"]["value_mappings"]
     assert {"from_value": "b_3_months1_year", "to_value": ""} in age_maps
     assert len(age_maps) == 6
+
+
+def test_tag_picker_default_resolves_id_or_name_ref():
+    """scaffold_mapping pre-selects the tag picker's default via
+    _default_tag_name — the production helper is exercised directly, against
+    a real TagIndexData built the same way scaffold_mapping builds one."""
+    from app.datasource.cli import _default_tag_name
+    from app.datasource.tag_index import _build_index
+
+    index = _build_index(_TAGS)
+
+    # ID ref (what the portal dropdown would store) resolves to the tag name.
+    assert _default_tag_name(index, {"tag": "26"}) == "Rhino Carcass"
+
+    # Name ref resolves to itself.
+    assert _default_tag_name(index, {"tag": "Rhino Carcass"}) == "Rhino Carcass"
+
+    # No existing entry → no default.
+    assert _default_tag_name(index, None) is None
+
+    # A ref that no longer resolves (tag deleted/renamed away) → no default.
+    assert _default_tag_name(index, {"tag": "9999"}) is None
+    assert _default_tag_name(index, {"tag": "No Such Tag"}) is None
 
 
 def test_ensure_scheme_prepends_https_when_missing():

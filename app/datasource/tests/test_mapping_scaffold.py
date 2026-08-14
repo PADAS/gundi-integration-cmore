@@ -88,21 +88,21 @@ def test_parse_real_er_api_schema_inline_enum():
 
 
 def _rhino_tag():
-    return TagInfo(
+    return TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={
-            "Rhino Spesies": FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
-                                       lookups=_lookup("White", "Black")),
-            "Animal Sex": FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
-                                    lookups=_lookup("Male", "Female", "Indeterminable")),
-            "Animal Age": FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
-                                    lookups=_lookup("Adult", "Sub-Adult", "Calf")),
-            "Carcass Age": FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
-                                     lookups=_lookup("Today", "Fresh (less than 3 days)")),
-            "Kill Type": FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
-                                   lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
-            "Skull Tag Number": FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
-        },
+        fields=[
+            FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
+                      lookups=_lookup("White", "Black")),
+            FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                      lookups=_lookup("Male", "Female", "Indeterminable")),
+            FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                      lookups=_lookup("Adult", "Sub-Adult", "Calf")),
+            FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
+                      lookups=_lookup("Today", "Fresh (less than 3 days)")),
+            FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
+                      lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
+            FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
+        ],
     )
 
 
@@ -148,7 +148,8 @@ def _rhino_er_fields():
 
 
 def test_build_scaffold_on_rhino_carcass():
-    result = build_scaffold(_rhino_er_fields(), _rhino_tag(), event_type="rhino_carcass")
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
 
     by_key = {f.event_details_key: f for f in result.fields}
 
@@ -174,8 +175,25 @@ def test_build_scaffold_on_rhino_carcass():
     # CMORE fields with no ER counterpart are reported.
     assert "Rhino Spesies" in result.uncovered_cmore_fields
 
-    # The rendered config entry is CmoreTagMapping-shaped.
+    # The rendered config entry is CmoreTagMapping-shaped, keyed by id.
     entry = result.to_config_entry()
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag_name"] == "Rhino Carcass"
-    assert any(fm["cmore_field_name"] == "Animal Sex" for fm in entry["field_mappings"])
+    assert entry["tag"] == str(tag.id)
+    assert any(fm["cmore_field"] == "1261" for fm in entry["field_mappings"])
+
+
+def test_to_config_entry_emits_ids():
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
+    entry = result.to_config_entry()
+    assert entry["tag"] == str(tag.id)
+    by_key = {fm["event_details_key"]: fm for fm in entry["field_mappings"]}
+    assert by_key["animal_sex"]["cmore_field"] == "1261"
+
+
+def test_legend_lines_pair_ids_with_names():
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
+    lines = result.legend_lines()
+    assert lines[0] == f'tag {tag.id} = "Rhino Carcass"'
+    assert 'field 1261 = "Animal Sex" (Lookup)' in lines

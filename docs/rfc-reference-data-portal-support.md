@@ -1,5 +1,7 @@
 # RFC: Reference-data actions — live options for integration config forms
 
+> **Superseded detail (2026-08-14):** the CMORE config fields and reference-action params shown in the examples below were renamed `tag_name`→`tag`, `field_name`→`field`, `cmore_field_name`→`cmore_field`, and dropdown option values now carry tag/field IDs with names as labels — see [configuration.md](configuration.md#how-tag-and-field-refs-are-resolved). Payload shapes are otherwise unchanged.
+
 **Status:** Proposal to the Gundi platform team
 **Author:** Chris Doehring
 **Date:** 2026-08-03

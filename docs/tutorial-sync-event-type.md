@@ -49,13 +49,25 @@ You need working logins for all three systems:
 |---|---|---|
 | EarthRanger | A site login that can report events | `gundi-dev.staging.pamdas.org` |
 | Gundi portal | An account in your organisation | `gundiservice.org` |
-| CMORE | A user in your organisation's share group | `cmorewc1.chpc.ac.za` |
+| CMORE | A user in your organisation's share group, with the **Integration permission** | `cmorewc1.chpc.ac.za` |
+
+> **CMORE URLs are instance-specific.** Every CMORE deployment has its own
+> address — there is no single global CMORE server. This guide's screenshots
+> use the `cmorewc1.chpc.ac.za` test instance; substitute your own instance's
+> URL wherever one appears. For example, on the DFFE environment the portal is
+> `https://cmore.csir.co.za` and the API base is
+> `https://cmore.csir.co.za/za/WebAPI/api`. If you don't know your instance's
+> URL, ask your CMORE administrator.
 
 > **Ask your CMORE administrator (CSIR) for these — they are not self-service:**
 >
 > 1. **An organisation (share group) on the CMORE instance**, with your CMORE
 >    user in it. Organisations and share groups are created by the CMORE team.
-> 2. **Access to the tag domain you need.** Tags live in *tag domains* (for
+> 2. **The Integration permission on your CMORE account.** Creating and
+>    managing an external service (Part 1.2) requires it. If the Admin Site
+>    doesn't show the **Service** menu, you don't have it — contact the CMORE
+>    team.
+> 3. **Access to the tag domain you need.** Tags live in *tag domains* (for
 >    example, the **Wildlife** domain contains Rhino Carcass, Poacher
 >    Sighting, Wounded Rhino and 14 more). Your share group can only use tags
 >    from domains it has been granted. Domains you don't have simply don't
@@ -95,6 +107,10 @@ CMORE has two web interfaces, and this part uses both:
 
 1. In the left menu, click **Service**. You'll see the **External Services**
    list — every integration identity your organisation has.
+
+   > Don't see **Service** in the menu? Your CMORE account lacks the
+   > **Integration permission** — ask the CMORE team to grant it (see
+   > Prerequisites).
 
    ![External Services list](images/cmore-08-external-services.png)
 
@@ -154,8 +170,10 @@ The token only works when the service points at your share group.
    ![New Event: Choose a tag, grouped by domain](images/cmore-14-new-event-choose-tag.png)
 
 You now have the three values Part 2 needs: the **API token**, the **API base
-URL** (your CMORE server + `/za/WebAPI/api`, e.g.
-`https://cmorewc1.chpc.ac.za/za/WebAPI/api`), and the **Owner Group ID**.
+URL** (your CMORE instance's server + `/za/WebAPI/api` — e.g.
+`https://cmore.csir.co.za/za/WebAPI/api` on DFFE, or
+`https://cmorewc1.chpc.ac.za/za/WebAPI/api` on the test instance used here),
+and the **Owner Group ID**.
 
 ## Part 2: Configure the Gundi destination
 
@@ -185,7 +203,7 @@ Rhino Carcass tag.
 
    | Field | Value |
    |---|---|
-   | **API Base URL** | e.g. `https://cmorewc1.chpc.ac.za/za/WebAPI/api` — note it ends with `/za/WebAPI/api`, not just the host |
+   | **API Base URL** | *your* CMORE instance's server + `/za/WebAPI/api` (e.g. `https://cmore.csir.co.za/za/WebAPI/api` on DFFE) — note it ends with `/za/WebAPI/api`, not just the host |
    | **API Token** | the service's Auth Token (paste the raw value — the field shows it masked) |
    | **Owner Group ID** | your share group's numeric ID (the service's Target Group ID, e.g. `8334`) |
 
@@ -204,18 +222,26 @@ Without a mapping, events still arrive in CMORE — description, location, and
 a link back to EarthRanger — but *unclassified*. The mapping is what fills in
 the structured tag fields.
 
+> **Why unclassified matters:** an unclassified event is visible on the map,
+> but it's invisible to everything in CMORE that keys off classification —
+> tag-based filtering and lookups, analytics, reporting, dashboards, and
+> rule-based workflows will not include it. If you want an event type to
+> count anywhere beyond the map view, it needs a mapping.
+
 In **Deliver**, add an entry to **Event type → CMORE tag**:
 
 1. **Gundi event_type**: `rhino_carcass` — the EarthRanger event type's
    internal name (ask your EarthRanger admin, or check the event type's
    value in the ER admin — it's the lowercase name with underscores, not the
    display name).
-2. **CMORE Tag Name**: `Rhino Carcass` — exactly as the tag is spelled in
-   CMORE's tag chooser.
+2. **CMORE Tag**: the tag's **ID** (preferred — it keeps working if the tag
+   is ever renamed; the `scaffold-mapping` tool's legend shows it, and the
+   portal's dropdown stores it automatically) or the tag name `Rhino
+   Carcass` spelled exactly as in CMORE's tag chooser.
 3. **Field Mappings** — one row per detail you want carried over. Our test
    system maps six:
 
-   | Gundi event_details key (from ER) | CMORE field name |
+   | Gundi event_details key (from ER) | CMORE field (name or ID) |
    |---|---|
    | `animal_sex` | `Animal Sex` |
    | `age_of_animal` | `Animal Age` |
@@ -226,6 +252,8 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
 
    (Yes, "Rhino Spesies" — use CMORE's spelling exactly as it appears in the
    tag.)
+   Field IDs work here too and are rename-proof — the scaffold tool emits
+   them for you.
 
    ![The rhino_carcass → Rhino Carcass mapping in the Deliver config](images/gundi-05-deliver-mapping.png)
 

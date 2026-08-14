@@ -17,9 +17,13 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
         ui_options=UIOptions(widget="password"),
     )
     base_url: str = FieldWithUIOptions(
-        "https://cmorewc1.chpc.ac.za/za/WebAPI/api",
+        ...,
         title="API Base URL",
-        description="Base URL for the C-more API.",
+        description=(
+            "Base URL for the C-more API on your CMORE instance: the server "
+            "plus '/za/WebAPI/api' (e.g. https://cmore.csir.co.za/za/WebAPI/api). "
+            "URLs differ per CMORE deployment."
+        ),
     )
     owner_group_id: int = FieldWithUIOptions(
         ...,
@@ -39,14 +43,14 @@ class ListTagNamesQuery(ReferenceActionConfiguration):
 class ListTagFieldsQuery(ReferenceActionConfiguration):
     """Query model for action_list_tag_fields."""
 
-    tag_name: str
+    tag: str  # tag id (preferred) or exact tag name
 
 
 class ListFieldOptionsQuery(ReferenceActionConfiguration):
     """Query model for action_list_field_options."""
 
-    tag_name: str
-    field_name: str
+    tag: str
+    field: str  # field id (preferred) or exact field name
 
 
 class ListClassificationValuesQuery(ReferenceActionConfiguration):
@@ -94,17 +98,21 @@ class CmoreValueMapping(pydantic.BaseModel):
 
 
 class CmoreFieldMapping(pydantic.BaseModel):
-    """One Gundi event_details key → one CMORE field name (within a tag)."""
+    """One Gundi event_details key → one CMORE field (by id or name, within a tag)."""
 
     event_details_key: str = FieldWithUIOptions(
         ...,
         title="Gundi event_details key",
         description="Key inside the Gundi event's event_details dict.",
     )
-    cmore_field_name: str = FieldWithUIOptions(
+    cmore_field: str = FieldWithUIOptions(
         ...,
-        title="CMORE field name",
-        description="Field name within the chosen CMORE tag.",
+        title="CMORE Field",
+        description=(
+            "The CMORE field within the chosen tag. Preferably the immutable "
+            "field ID (what the portal dropdown stores); an exact field name "
+            "also works but breaks if the field is renamed in CMORE."
+        ),
     )
     value_mappings: List[CmoreValueMapping] = FieldWithUIOptions(
         default_factory=list,
@@ -120,28 +128,29 @@ class CmoreFieldMapping(pydantic.BaseModel):
 
 
 class CmoreTagMapping(pydantic.BaseModel):
-    """Map a Gundi event_type to a CMORE tag (by name) and its fields."""
+    """Map a Gundi event_type to a CMORE tag (by id or name) and its fields."""
 
     event_type: str = FieldWithUIOptions(
         ...,
         title="Gundi event_type",
         description="The event_type string on incoming Gundi events.",
     )
-    tag_name: str = FieldWithUIOptions(
+    tag: str = FieldWithUIOptions(
         ...,
-        title="CMORE Tag Name",
+        title="CMORE Tag",
         description=(
-            "Name of the CMORE tag to attach to events of this type "
-            "(e.g., 'Poacher Sighting'). Resolved to a tagId at runtime via "
-            "CMORE's /v2/tags/getfull endpoint."
+            "The CMORE tag to attach to events of this type. Preferably the "
+            "immutable tag ID (e.g. '8443', what the portal dropdown stores); "
+            "an exact tag name also works but breaks if the tag is renamed. "
+            "Resolved at runtime via CMORE's /v2/tags/getfull endpoint."
         ),
     )
     field_mappings: List[CmoreFieldMapping] = FieldWithUIOptions(
         default_factory=list,
         title="Field Mappings",
         description=(
-            "Map Gundi event_details keys to CMORE field names within the "
-            "chosen tag. Values are coerced per the CMORE field's data type: "
+            "Map Gundi event_details keys to CMORE fields (by id or name) "
+            "within the chosen tag. Values are coerced per the CMORE field's data type: "
             "Lookup/FixedLookup values are resolved to a valid option (using "
             "the optional value mappings, then a case/punctuation-insensitive "
             "match); Number/Boolean values are validated; everything else is "
@@ -303,18 +312,19 @@ class DeliverConfig(PushActionConfiguration):
                 "items": {
                     "ui:order": list(CmoreTagMapping.__fields__),
                     "event_type": {"ui:placeholder": "e.g. poacher_sighting"},
-                    "tag_name": {
-                        "ui:placeholder": "e.g. Poacher Sighting",
+                    "tag": {
+                        "ui:placeholder": "e.g. 8443 or Rhino Carcass",
                         "ui:help": (
-                            "Exact tag name from the CMORE instance. Must "
-                            "be visible to this integration's ShareGroup."
+                            "Tag ID (preferred, rename-proof) or exact tag "
+                            "name. Must be visible to this integration's "
+                            "ShareGroup."
                         ),
                     },
                     "field_mappings": {
                         "items": {
                             "ui:order": list(CmoreFieldMapping.__fields__),
                             "event_details_key": {"ui:placeholder": "e.g. animal_sex"},
-                            "cmore_field_name": {"ui:placeholder": "e.g. Animal Sex"},
+                            "cmore_field": {"ui:placeholder": "e.g. 1261 or Animal Sex"},
                             "value_mappings": {
                                 "items": {
                                     "ui:order": list(CmoreValueMapping.__fields__),
@@ -346,23 +356,23 @@ class DeliverConfig(PushActionConfiguration):
 
         # Reference-data annotations (inert until the portal supports them).
         event_items = base["event_type_to_tag"]["items"]
-        event_items["tag_name"]["gundi:reference"] = _reference("list_tag_names")
+        event_items["tag"]["gundi:reference"] = _reference("list_tag_names")
         field_items = event_items["field_mappings"]["items"]
-        field_items["cmore_field_name"]["gundi:reference"] = _reference(
-            "list_tag_fields", {"tag_name": {"$data": "../../tag_name"}}
+        field_items["cmore_field"]["gundi:reference"] = _reference(
+            "list_tag_fields", {"tag": {"$data": "../../tag"}}
         )
         value_items = field_items["value_mappings"]["items"]
         value_items["to_value"]["gundi:reference"] = _reference(
             "list_field_options",
             {
-                "tag_name": {"$data": "../../../../tag_name"},
-                "field_name": {"$data": "../../cmore_field_name"},
+                "tag": {"$data": "../../../../tag"},
+                "field": {"$data": "../../cmore_field"},
             },
         )
         # Source-side (EarthRanger) vocabulary — served by the ER runner's
         # reference actions via target="provider". $data paths mirror the
-        # self-target siblings above: event_type sits next to tag_name,
-        # event_details_key next to cmore_field_name, from_value next to
+        # self-target siblings above: event_type sits next to tag,
+        # event_details_key next to cmore_field, from_value next to
         # to_value.
         event_items["event_type"]["gundi:reference"] = _reference(
             "list_event_types", target="provider"

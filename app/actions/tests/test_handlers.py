@@ -91,10 +91,10 @@ def deliver_config():
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="lion_sighting",
-                tag_name="Wildlife Sighting",
+                tag="Wildlife Sighting",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
-                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
+                    CmoreFieldMapping(event_details_key="species", cmore_field="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
                 ],
             ),
         ],
@@ -106,15 +106,15 @@ def fake_tag_info():
     """Stand-in TagInfo a tag_index.get mock can return."""
     from app.datasource.tag_index import FieldInfo, TagInfo
 
-    return TagInfo(
+    return TagInfo.build(
         id=42,
         name="Wildlife Sighting",
         domain="Wildlife",
         type_limiter="Incident",
-        fields={
-            "Species": FieldInfo(id=101, name="Species", data_type="String"),
-            "Count": FieldInfo(id=102, name="Count", data_type="Number"),
-        },
+        fields=[
+            FieldInfo(id=101, name="Species", data_type="String"),
+            FieldInfo(id=102, name="Count", data_type="Number"),
+        ],
     )
 
 
@@ -337,11 +337,11 @@ async def test_event_field_mapping_skips_unknown_field(
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="lion_sighting",
-                tag_name="Wildlife Sighting",
+                tag="Wildlife Sighting",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
-                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
-                    CmoreFieldMapping(event_details_key="made_up", cmore_field_name="Nonexistent"),
+                    CmoreFieldMapping(event_details_key="species", cmore_field="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
+                    CmoreFieldMapping(event_details_key="made_up", cmore_field="Nonexistent"),
                 ],
             ),
         ],
@@ -361,6 +361,47 @@ async def test_event_field_mapping_skips_unknown_field(
     assert len(posted.tags[0].values) == 2
     posted_fields = {v.fieldId: v.value for v in posted.tags[0].values}
     assert posted_fields == {101: "lion", 102: "3"}
+
+
+@pytest.mark.asyncio
+async def test_event_tag_and_fields_resolve_by_id(
+    mocker, integration, provider_info, event, metadata, fake_tag_info
+):
+    """Mapping keyed by immutable ids: one field by id, one by name, both
+    resolve to the same fieldIds on the wire. (Tag-level id resolution is
+    covered in test_tag_index — tag_index.get is mocked here.)"""
+    from app.actions.configurations import (
+        CmoreFieldMapping,
+        CmoreTagMapping,
+        DeliverConfig,
+    )
+    from app.actions.handlers import action_deliver
+
+    deliver_config = DeliverConfig(
+        event_type_to_tag=[
+            CmoreTagMapping(
+                event_type="lion_sighting",
+                tag="42",
+                field_mappings=[
+                    CmoreFieldMapping(event_details_key="species", cmore_field="101"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
+                ],
+            ),
+        ],
+    )
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
+
+    event.event_details = {"species": "lion", "count": 3}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags[0].tagId == 42
+    assert {v.fieldId for v in posted.tags[0].values} == {101, 102}
+    assert result["event_posted"] is True
 
 
 def test_stringify_for_cmore_handles_common_types():
@@ -432,7 +473,7 @@ def test_resolve_field_values_applies_value_mapping_then_lookup():
                     lookups=_lookup("Adult", "Sub-Adult", "Calf"))
     fm = CmoreFieldMapping(
         event_details_key="age_of_animal",
-        cmore_field_name="Animal Age",
+        cmore_field="Animal Age",
         value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
     )
     assert _resolve_field_values(age, fm, "b_3_months1_year") == ["Calf"]
@@ -442,7 +483,7 @@ def test_resolve_field_values_supports_multi_value_lookup():
     """A multi-value lookup field expands a list into several resolved values."""
     evidence = FieldInfo(id=261, name="Evidence Type", data_type="Lookup",
                          allow_multiple=True, lookups=_lookup("Snare", "Trap", "Net"))
-    fm = CmoreFieldMapping(event_details_key="evidence", cmore_field_name="Evidence Type")
+    fm = CmoreFieldMapping(event_details_key="evidence", cmore_field="Evidence Type")
     assert _resolve_field_values(evidence, fm, ["snare", "net"]) == ["Snare", "Net"]
 
 
@@ -451,21 +492,21 @@ def rhino_carcass_tag_info():
     """Trimmed CMORE 'Rhino Carcass' tag mirroring the real Wildlife domain."""
     from app.datasource.tag_index import TagInfo
 
-    return TagInfo(
+    return TagInfo.build(
         id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
-        fields={
-            "Rhino Spesies": FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
-                                       lookups=_lookup("White", "Black")),
-            "Animal Sex": FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
-                                    lookups=_lookup("Male", "Female", "Indeterminable")),
-            "Animal Age": FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
-                                    lookups=_lookup("Adult", "Sub-Adult", "Calf")),
-            "Carcass Age": FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
-                                     lookups=_lookup("Today", "Fresh (less than 3 days)")),
-            "Kill Type": FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
-                                   lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
-            "Skull Tag Number": FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
-        },
+        fields=[
+            FieldInfo(id=294, name="Rhino Spesies", data_type="Lookup",
+                      lookups=_lookup("White", "Black")),
+            FieldInfo(id=1261, name="Animal Sex", data_type="Lookup",
+                      lookups=_lookup("Male", "Female", "Indeterminable")),
+            FieldInfo(id=1260, name="Animal Age", data_type="Lookup",
+                      lookups=_lookup("Adult", "Sub-Adult", "Calf")),
+            FieldInfo(id=1262, name="Carcass Age", data_type="Lookup",
+                      lookups=_lookup("Today", "Fresh (less than 3 days)")),
+            FieldInfo(id=1263, name="Kill Type", data_type="Lookup",
+                      lookups=_lookup("Darted", "Poisoned", "Shot", "Snare", "Spear")),
+            FieldInfo(id=1278, name="Skull Tag Number", data_type="String"),
+        ],
     )
 
 
@@ -483,24 +524,24 @@ async def test_deliver_rhino_carcass_resolves_lookups(
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="rhino_carcass",
-                tag_name="Rhino Carcass",
+                tag="Rhino Carcass",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="animal_sex", cmore_field_name="Animal Sex"),
+                    CmoreFieldMapping(event_details_key="animal_sex", cmore_field="Animal Sex"),
                     CmoreFieldMapping(
-                        event_details_key="animal_common_name", cmore_field_name="Rhino Spesies",
+                        event_details_key="animal_common_name", cmore_field="Rhino Spesies",
                         value_mappings=[CmoreValueMapping(from_value="Black Rhino", to_value="Black")],
                     ),
                     CmoreFieldMapping(
-                        event_details_key="age_of_animal", cmore_field_name="Animal Age",
+                        event_details_key="age_of_animal", cmore_field="Animal Age",
                         value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
                     ),
                     CmoreFieldMapping(
-                        event_details_key="age_of_carcass", cmore_field_name="Carcass Age",
+                        event_details_key="age_of_carcass", cmore_field="Carcass Age",
                         value_mappings=[CmoreValueMapping(from_value="very_fresh", to_value="Today")],
                     ),
                     # 'fence' maps to no valid Kill Type option → dropped.
-                    CmoreFieldMapping(event_details_key="cause_of_death", cmore_field_name="Kill Type"),
-                    CmoreFieldMapping(event_details_key="animal_id", cmore_field_name="Skull Tag Number"),
+                    CmoreFieldMapping(event_details_key="cause_of_death", cmore_field="Kill Type"),
+                    CmoreFieldMapping(event_details_key="animal_id", cmore_field="Skull Tag Number"),
                 ],
             ),
         ],

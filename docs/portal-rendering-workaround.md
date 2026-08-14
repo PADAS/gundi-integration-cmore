@@ -1,5 +1,7 @@
 # DeliverConfig schema-shape workaround for portal rendering
 
+> **Note (2026-08-14):** field names in the examples below predate the tag-ID mapping change (`tag_name`→`tag`, `cmore_field_name`→`cmore_field`); the workaround itself is unaffected.
+
 **Status:** active workaround
 **Tracking ticket:** [GUNDI-5371](https://allenai.atlassian.net/browse/GUNDI-5371)
 **Affects:** `app/actions/configurations.py` — `DeliverConfig` and its nested models

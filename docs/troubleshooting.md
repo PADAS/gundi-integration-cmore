@@ -28,9 +28,17 @@ event still posts (description + location) but the tag is dropped.
   ```
   Zero tags (or the domain missing) → a **CMORE admin must subscribe the
   ShareGroup to the tag domain**. The API can't do this; it's portal-admin only.
-- Also confirm the configured **Tag Name** matches a real CMORE tag exactly, and
-  that an `event_type_to_tag` entry exists for the event's `event_type` (an
-  unmapped type posts with no tag by design).
+- Also confirm the configured **CMORE Tag** ref resolves, and that an
+  `event_type_to_tag` entry exists for the event's `event_type` (an unmapped
+  type posts with no tag by design — note that untagged events are excluded
+  from CMORE's tag-based filtering, analytics, reporting, dashboards, and
+  rule-based workflows). Two ways a ref stops resolving:
+  - **ID-based ref** (`"tag": "8443"`): the ID doesn't exist on this instance
+    — typo, or the config was copied from a different CMORE instance (IDs are
+    instance-specific).
+  - **Name-based ref** (`"tag": "Rhino Carcass"`): the tag was renamed in
+    CMORE. Switch the mapping to the tag ID (the `get-tags` CLI output or the
+    scaffold legend shows it) — IDs survive renames.
 
 ## A specific lookup value is dropped
 

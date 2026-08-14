@@ -102,3 +102,15 @@ def test_gundi_reference_annotations_match_registered_reference_actions():
             name for name, f in config_model.__fields__.items() if f.required
         }
         assert required <= declared, (ref["action"], required - declared)
+
+
+def test_auth_base_url_is_required():
+    """Instance URLs must not default to any particular CMORE deployment
+    (CSIR feedback point 2)."""
+    import pydantic
+    import pytest
+    from app.actions.configurations import AuthenticateConfig
+
+    assert AuthenticateConfig.__fields__["base_url"].required
+    with pytest.raises(pydantic.ValidationError):
+        AuthenticateConfig(token="t", owner_group_id=1)

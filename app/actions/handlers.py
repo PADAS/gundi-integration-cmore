@@ -26,7 +26,7 @@ from app.datasource.schemas import (
     CmoreVirtualClientRequest,
     UploadType,
 )
-from app.datasource.tag_index import tag_index, _build_index
+from app.datasource.tag_index import TagIndexData, tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
@@ -74,7 +74,7 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     return {"valid_credentials": True}
 
 
-async def _fetch_tag_index(integration: Integration) -> dict:
+async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     """Fresh tag fetch for reference actions (config-time UX).
 
     Deliberately bypasses the module-level tag_index cache: that cache is
@@ -92,29 +92,42 @@ async def _fetch_tag_index(integration: Integration) -> dict:
 async def action_list_tag_names(
     integration: Integration, action_config: ListTagNamesQuery
 ):
-    """Reference action: all CMORE tag names visible to this integration."""
+    """Reference action: all CMORE tags visible to this integration.
+
+    Option values carry the immutable tag id (the preferred mapping key);
+    the tag name is the display label. Listed from the id view so same-named
+    tags in different domains all appear, disambiguated by group."""
     index = await _fetch_tag_index(integration)
     options = [
-        ReferenceOption(value=tag.name, group=tag.domain)
-        for tag in index.values()
+        ReferenceOption(
+            value=str(tag.id),
+            label=tag.name,
+            group=tag.domain,
+            description=f"ID {tag.id}",
+        )
+        for tag in index.by_id.values()
     ]
-    options.sort(key=lambda o: (o.group or "", o.value))
+    options.sort(key=lambda o: (o.group or "", o.label or ""))
     return ReferenceDataResponse(options=options).dict()
 
 
 async def action_list_tag_fields(
     integration: Integration, action_config: ListTagFieldsQuery
 ):
-    """Reference action: field names within one CMORE tag."""
+    """Reference action: fields within one CMORE tag (id-valued options)."""
     index = await _fetch_tag_index(integration)
-    tag = index.get(action_config.tag_name)
+    tag = index.resolve(action_config.tag)
     if tag is None:
         raise ValueError(
-            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+            f"Unknown CMORE tag {action_config.tag!r} for this integration."
         )
     options = [
-        ReferenceOption(value=f.name, description=f.data_type)
-        for f in tag.fields.values()
+        ReferenceOption(
+            value=str(f.id),
+            label=f.name,
+            description=f"{f.data_type} · ID {f.id}",
+        )
+        for f in tag.fields_by_id.values()
     ]
     return ReferenceDataResponse(options=options).dict()
 
@@ -128,16 +141,16 @@ async def action_list_field_options(
     free-text in CMORE, so there is nothing to suggest.
     """
     index = await _fetch_tag_index(integration)
-    tag = index.get(action_config.tag_name)
+    tag = index.resolve(action_config.tag)
     if tag is None:
         raise ValueError(
-            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+            f"Unknown CMORE tag {action_config.tag!r} for this integration."
         )
-    field_info = tag.field_by_name(action_config.field_name)
+    field_info = tag.resolve_field(action_config.field)
     if field_info is None:
         raise ValueError(
-            f"Unknown field {action_config.field_name!r} in CMORE tag "
-            f"{action_config.tag_name!r}."
+            f"Unknown field {action_config.field!r} in CMORE tag "
+            f"{action_config.tag!r}."
         )
     if field_info.data_type not in ("Lookup", "FixedLookup"):
         return ReferenceDataResponse(options=[]).dict()
@@ -497,12 +510,12 @@ async def _build_event_tag(
     the event still gets posted (with description + location), just without
     the structured tag.
     """
-    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag_name)
+    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag)
     if tag_info is None:
         logger.warning(
             "CMORE tag %r not found on instance; dropping tag from event "
             "(event_type=%r). Event will still post with description/location only.",
-            mapping.tag_name,
+            mapping.tag,
             event.event_type,
         )
         return None
@@ -521,13 +534,13 @@ async def _build_event_tag(
     values = []
     for fm in (mapping.field_mappings or []):
         ed_key = fm.event_details_key
-        field_name = fm.cmore_field_name
-        field_info = tag_info.field_by_name(field_name)
+        field_ref = fm.cmore_field
+        field_info = tag_info.resolve_field(field_ref)
         if field_info is None:
             logger.warning(
                 "CMORE tag %r has no field %r; skipping event_details key %r.",
                 tag_info.name,
-                field_name,
+                field_ref,
                 ed_key,
             )
             continue
