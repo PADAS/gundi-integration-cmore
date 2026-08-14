@@ -92,29 +92,42 @@ async def _fetch_tag_index(integration: Integration) -> TagIndexData:
 async def action_list_tag_names(
     integration: Integration, action_config: ListTagNamesQuery
 ):
-    """Reference action: all CMORE tag names visible to this integration."""
+    """Reference action: all CMORE tags visible to this integration.
+
+    Option values carry the immutable tag id (the preferred mapping key);
+    the tag name is the display label. Listed from the id view so same-named
+    tags in different domains all appear, disambiguated by group."""
     index = await _fetch_tag_index(integration)
     options = [
-        ReferenceOption(value=tag.name, group=tag.domain)
-        for tag in index.by_name.values()
+        ReferenceOption(
+            value=str(tag.id),
+            label=tag.name,
+            group=tag.domain,
+            description=f"ID {tag.id}",
+        )
+        for tag in index.by_id.values()
     ]
-    options.sort(key=lambda o: (o.group or "", o.value))
+    options.sort(key=lambda o: (o.group or "", o.label or ""))
     return ReferenceDataResponse(options=options).dict()
 
 
 async def action_list_tag_fields(
     integration: Integration, action_config: ListTagFieldsQuery
 ):
-    """Reference action: field names within one CMORE tag."""
+    """Reference action: fields within one CMORE tag (id-valued options)."""
     index = await _fetch_tag_index(integration)
-    tag = index.by_name.get(action_config.tag_name)
+    tag = index.resolve(action_config.tag)
     if tag is None:
         raise ValueError(
-            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+            f"Unknown CMORE tag {action_config.tag!r} for this integration."
         )
     options = [
-        ReferenceOption(value=f.name, description=f.data_type)
-        for f in tag.fields_by_name.values()
+        ReferenceOption(
+            value=str(f.id),
+            label=f.name,
+            description=f"{f.data_type} · ID {f.id}",
+        )
+        for f in tag.fields_by_id.values()
     ]
     return ReferenceDataResponse(options=options).dict()
 
@@ -128,16 +141,16 @@ async def action_list_field_options(
     free-text in CMORE, so there is nothing to suggest.
     """
     index = await _fetch_tag_index(integration)
-    tag = index.by_name.get(action_config.tag_name)
+    tag = index.resolve(action_config.tag)
     if tag is None:
         raise ValueError(
-            f"Unknown CMORE tag {action_config.tag_name!r} for this integration."
+            f"Unknown CMORE tag {action_config.tag!r} for this integration."
         )
-    field_info = tag.resolve_field(action_config.field_name)
+    field_info = tag.resolve_field(action_config.field)
     if field_info is None:
         raise ValueError(
-            f"Unknown field {action_config.field_name!r} in CMORE tag "
-            f"{action_config.tag_name!r}."
+            f"Unknown field {action_config.field!r} in CMORE tag "
+            f"{action_config.tag!r}."
         )
     if field_info.data_type not in ("Lookup", "FixedLookup"):
         return ReferenceDataResponse(options=[]).dict()

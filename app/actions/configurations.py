@@ -43,14 +43,14 @@ class ListTagNamesQuery(ReferenceActionConfiguration):
 class ListTagFieldsQuery(ReferenceActionConfiguration):
     """Query model for action_list_tag_fields."""
 
-    tag_name: str
+    tag: str  # tag id (preferred) or exact tag name
 
 
 class ListFieldOptionsQuery(ReferenceActionConfiguration):
     """Query model for action_list_field_options."""
 
-    tag_name: str
-    field_name: str
+    tag: str
+    field: str  # field id (preferred) or exact field name
 
 
 class ListClassificationValuesQuery(ReferenceActionConfiguration):
@@ -359,14 +359,14 @@ class DeliverConfig(PushActionConfiguration):
         event_items["tag"]["gundi:reference"] = _reference("list_tag_names")
         field_items = event_items["field_mappings"]["items"]
         field_items["cmore_field"]["gundi:reference"] = _reference(
-            "list_tag_fields", {"tag_name": {"$data": "../../tag"}}
+            "list_tag_fields", {"tag": {"$data": "../../tag"}}
         )
         value_items = field_items["value_mappings"]["items"]
         value_items["to_value"]["gundi:reference"] = _reference(
             "list_field_options",
             {
-                "tag_name": {"$data": "../../../../tag"},
-                "field_name": {"$data": "../../cmore_field"},
+                "tag": {"$data": "../../../../tag"},
+                "field": {"$data": "../../cmore_field"},
             },
         )
         # Source-side (EarthRanger) vocabulary — served by the ER runner's
