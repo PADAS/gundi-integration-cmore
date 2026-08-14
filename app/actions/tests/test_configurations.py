@@ -74,6 +74,7 @@ def test_gundi_reference_annotations_match_registered_reference_actions():
     # query models can't be validated here, so pin the contract by name+params
     # against gundi-integration-earthranger's registered actions instead.
     assert {ref["action"] for _, ref in provider_refs} == {
+        "list_subject_types",
         "list_event_types",
         "list_event_type_fields",
         "list_event_field_values",
@@ -82,10 +83,17 @@ def test_gundi_reference_annotations_match_registered_reference_actions():
         ref["action"]: set(ref.get("params", {})) for _, ref in provider_refs
     }
     assert provider_params_by_action == {
+        "list_subject_types": set(),
         "list_event_types": set(),
         "list_event_type_fields": {"event_type"},
         "list_event_field_values": {"event_type", "field_key"},
     }
+
+    # Both subject-mapping lists offer the same provider-side vocabulary.
+    subject_type_hosts = [
+        node for node, ref in provider_refs if ref["action"] == "list_subject_types"
+    ]
+    assert len(subject_type_hosts) == 2
 
     for host_node, ref in found:
         assert "ui:widget" not in host_node, ref["action"]

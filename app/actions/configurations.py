@@ -390,7 +390,19 @@ class DeliverConfig(PushActionConfiguration):
             },
             target="provider",
         )
+        # Subject-side (EarthRanger) vocabulary — the subject_type fields in
+        # both subject-mapping lists offer the provider's observed subject
+        # subtypes (grouped by subject type, with the types themselves as
+        # fallback options), served by the ER runner's list_subject_types
+        # reference action. No params, no cascade.
+        affiliation_items = base["subject_type_to_affiliation"]["items"]
+        affiliation_items["subject_type"]["gundi:reference"] = _reference(
+            "list_subject_types", target="provider"
+        )
         classification_items = base["subject_type_to_classification"]["items"]
+        classification_items["subject_type"]["gundi:reference"] = _reference(
+            "list_subject_types", target="provider"
+        )
         classification_items["battleDimension"]["gundi:reference"] = _reference(
             "list_classification_values"
         )
