@@ -212,6 +212,49 @@ async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
     assert result.fields[0].value_mappings == [{"from_value": "b_3_months1_year", "to_value": "Calf"}]
 
 
+@pytest.mark.asyncio
+async def test_interactive_fill_keeps_existing_mapping_as_default_with_id_ref(mocker):
+    """Same as test_interactive_fill_keeps_existing_mapping_as_default, but the
+    stored existing_entry references the CMORE field by its numeric ID (as a
+    portal dropdown would store it) rather than by name. _interactive_fill
+    must resolve the ID ref via tag_info.resolve_field() before using it as
+    the default, so behavior matches the name-ref case exactly."""
+    from app.datasource.cli import _interactive_fill
+    from app.datasource.er_schema import ERChoice, ERField
+    from app.datasource.mapping_scaffold import FieldScaffold, ScaffoldResult
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    mocker.patch("sys.stdin.isatty", return_value=False)        # numbered fallback
+    mocker.patch.object(cli_module.click, "prompt", return_value="")  # Enter = keep default
+
+    tag_info = TagInfo.build(
+        id=26, name="Rhino Carcass", domain="Wildlife", type_limiter="Incident",
+        fields=[FieldInfo(
+            id=1260, name="Animal Age", data_type="Lookup",
+            lookups=[{"id": 1, "value": "Adult"}, {"id": 2, "value": "Sub-Adult"}, {"id": 3, "value": "Calf"}],
+        )],
+    )
+    er_fields = [ERField("age_of_animal", "Age Of Animal",
+                         [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
+    result = ScaffoldResult(
+        event_type="rhino_carcass", tag_name="Rhino Carcass",
+        fields=[FieldScaffold(
+            event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
+        )],
+    )
+    existing_entry = {"field_mappings": [{
+        "event_details_key": "age_of_animal", "cmore_field": "1260",  # ID ref, not name
+        "value_mappings": [{"from_value": "b_3_months1_year", "to_value": "Calf"}],
+    }]}
+
+    await _interactive_fill(result, tag_info, er_fields, existing_entry)
+
+    # Enter kept the existing 'Calf' mapping rather than dropping it, exactly
+    # as when the ref was the field name.
+    assert result.fields[0].value_mappings == [{"from_value": "b_3_months1_year", "to_value": "Calf"}]
+
+
 def test_interactive_next_and_back_navigation(tmp_path):
     """'n' advances to the next field; 'b' returns to the previous one to edit."""
     tags_file = tmp_path / "tags.json"
@@ -288,6 +331,39 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
     age_maps = by_field["Animal Age"]["value_mappings"]
     assert {"from_value": "b_3_months1_year", "to_value": ""} in age_maps
     assert len(age_maps) == 6
+
+
+def test_tag_picker_default_resolves_id_or_name_ref():
+    """Pins scaffold_mapping's tag-picker default-resolution logic (the
+    ``existing_ref = (existing_entry or {}).get("tag"); existing_tag =
+    index.resolve(str(existing_ref)) ...; default=existing_tag.name if
+    existing_tag else None`` snippet at the top of the interactive tag-picker
+    branch). Driving the full CLI command through this branch would require
+    mocking a live Gundi connection (existing_entry is only populated via
+    --connection, which no test in this file exercises), so this test instead
+    reproduces the exact snippet against a real TagIndexData built the same
+    way scaffold_mapping builds one (_build_index), covering both an ID ref
+    and a name ref plus the no-existing-entry case."""
+    from app.datasource.tag_index import _build_index
+
+    index = _build_index(_TAGS)
+
+    # ID ref (what the portal dropdown would store) resolves to the tag name.
+    existing_entry = {"tag": "26"}
+    existing_ref = (existing_entry or {}).get("tag")
+    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
+    assert (existing_tag.name if existing_tag else None) == "Rhino Carcass"
+
+    # Name ref resolves to itself.
+    existing_entry = {"tag": "Rhino Carcass"}
+    existing_ref = (existing_entry or {}).get("tag")
+    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
+    assert (existing_tag.name if existing_tag else None) == "Rhino Carcass"
+
+    # No existing entry → no default.
+    existing_ref = (None or {}).get("tag")
+    existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
+    assert (existing_tag.name if existing_tag else None) is None
 
 
 def test_ensure_scheme_prepends_https_when_missing():
