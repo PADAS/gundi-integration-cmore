@@ -148,7 +148,8 @@ def _rhino_er_fields():
 
 
 def test_build_scaffold_on_rhino_carcass():
-    result = build_scaffold(_rhino_er_fields(), _rhino_tag(), event_type="rhino_carcass")
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
 
     by_key = {f.event_details_key: f for f in result.fields}
 
@@ -174,8 +175,25 @@ def test_build_scaffold_on_rhino_carcass():
     # CMORE fields with no ER counterpart are reported.
     assert "Rhino Spesies" in result.uncovered_cmore_fields
 
-    # The rendered config entry is CmoreTagMapping-shaped.
+    # The rendered config entry is CmoreTagMapping-shaped, keyed by id.
     entry = result.to_config_entry()
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag"] == "Rhino Carcass"
-    assert any(fm["cmore_field"] == "Animal Sex" for fm in entry["field_mappings"])
+    assert entry["tag"] == str(tag.id)
+    assert any(fm["cmore_field"] == "1261" for fm in entry["field_mappings"])
+
+
+def test_to_config_entry_emits_ids():
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
+    entry = result.to_config_entry()
+    assert entry["tag"] == str(tag.id)
+    by_key = {fm["event_details_key"]: fm for fm in entry["field_mappings"]}
+    assert by_key["animal_sex"]["cmore_field"] == "1261"
+
+
+def test_legend_lines_pair_ids_with_names():
+    tag = _rhino_tag()
+    result = build_scaffold(_rhino_er_fields(), tag, event_type="rhino_carcass")
+    lines = result.legend_lines()
+    assert lines[0] == f'tag {tag.id} = "Rhino Carcass"'
+    assert 'field 1261 = "Animal Sex" (Lookup)' in lines

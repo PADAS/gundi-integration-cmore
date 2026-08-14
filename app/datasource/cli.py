@@ -435,9 +435,12 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
             continue
         uncovered.remove(name)
         result.unmatched_er_fields.remove(er_key)
-        scaffold = FieldScaffold(event_details_key=er_key, cmore_field_name=name)
         # Seed value mappings for a newly-wired lookup field from its ER choices.
         field_info = tag_info.resolve_field(name)
+        scaffold = FieldScaffold(
+            event_details_key=er_key, cmore_field_name=name,
+            cmore_field_id=field_info.id, cmore_field_type=field_info.data_type,
+        )
         er_field = er_by_key.get(er_key)
         if field_info.data_type in LOOKUP_TYPES and er_field and er_field.choices:
             for choice in er_field.choices:
@@ -631,6 +634,10 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         entry = result.to_config_entry()
         rendered = json.dumps(entry, indent=2)
         click.echo("\n--- mapping entry ---\n" + rendered)
+
+        click.echo("\n--- name legend (ids are what the entry stores) ---")
+        for line in result.legend_lines():
+            click.echo("  " + line)
 
         if out:
             with open(out, "w") as fh:

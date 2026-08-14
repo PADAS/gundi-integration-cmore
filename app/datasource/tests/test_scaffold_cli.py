@@ -134,9 +134,10 @@ def test_interactive_picker_and_value_fill(tmp_path):
 
     by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # male/female auto-resolve (display match) → only 'unknown' mapped.
-    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    # Animal Sex=id 1, Rhino Spesies=id 2 per _INTERACTIVE_TAGS.
+    assert by_field["1"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
     # The picker wired 'species' → Rhino Spesies; both values filled by number.
-    species = by_field["Rhino Spesies"]["value_mappings"]
+    species = by_field["2"]["value_mappings"]
     assert {"from_value": "bw", "to_value": "Black"} in species
     assert {"from_value": "wt", "to_value": "White"} in species
 
@@ -195,9 +196,10 @@ async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
     er_fields = [ERField("age_of_animal", "Age Of Animal",
                          [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
     result = ScaffoldResult(
-        event_type="rhino_carcass", tag_name="Rhino Carcass",
+        event_type="rhino_carcass", tag_name="Rhino Carcass", tag_id=26,
         fields=[FieldScaffold(
             event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            cmore_field_id=1260,
             value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
         )],
     )
@@ -237,9 +239,10 @@ async def test_interactive_fill_keeps_existing_mapping_as_default_with_id_ref(mo
     er_fields = [ERField("age_of_animal", "Age Of Animal",
                          [ERChoice("b_3_months1_year", "B: 3 Months - 1 Year")])]
     result = ScaffoldResult(
-        event_type="rhino_carcass", tag_name="Rhino Carcass",
+        event_type="rhino_carcass", tag_name="Rhino Carcass", tag_id=26,
         fields=[FieldScaffold(
             event_details_key="age_of_animal", cmore_field_name="Animal Age",
+            cmore_field_id=1260,
             value_mappings=[{"from_value": "b_3_months1_year", "to_value": ""}],
         )],
     )
@@ -277,8 +280,9 @@ def test_interactive_next_and_back_navigation(tmp_path):
 
     by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # Going back let us set Animal Sex after initially skipping it.
-    assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
-    species = by_field["Rhino Spesies"]["value_mappings"]
+    # Animal Sex=id 1, Rhino Spesies=id 2 per _INTERACTIVE_TAGS.
+    assert by_field["1"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
+    species = by_field["2"]["value_mappings"]
     assert {"from_value": "bw", "to_value": "Black"} in species
     assert {"from_value": "wt", "to_value": "White"} in species
 
@@ -321,14 +325,15 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
 
     entry = json.loads(out_file.read_text())
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag"] == "Rhino Carcass"
+    assert entry["tag"] == "26"  # Rhino Carcass tag id, per _TAGS
 
     by_field = {fm["cmore_field"]: fm for fm in entry["field_mappings"]}
     # animal_sex: female/male auto-resolve (display match); only 'Unknown' is left.
-    sex_maps = by_field["Animal Sex"].get("value_mappings", [])
+    # Animal Sex=id 1261, Animal Age=id 1260 per _TAGS.
+    sex_maps = by_field["1261"].get("value_mappings", [])
     assert sex_maps == [{"from_value": "Unknown", "to_value": ""}]
     # age_of_animal: none of ER's six buckets match Adult/Calf → all blank.
-    age_maps = by_field["Animal Age"]["value_mappings"]
+    age_maps = by_field["1260"]["value_mappings"]
     assert {"from_value": "b_3_months1_year", "to_value": ""} in age_maps
     assert len(age_maps) == 6
 
