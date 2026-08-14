@@ -312,3 +312,18 @@ async def test_tag_index_reset_clears_cache():
 
     # Cache was cleared, so get_tags called twice.
     assert client.get_tags.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_id_mapping_survives_tag_rename():
+    """The CSIR scenario: a tag renamed in CMORE. An id-based mapping keeps
+    resolving; the old name (a name-based mapping) stops — the failure mode
+    this change eliminates."""
+    idx = TagIndex()
+    renamed = _sample_response()
+    renamed[0]["tags"][0]["name"] = "Poacher Sighting (Legacy)"
+    client = _make_client_with_get_tags(renamed)
+
+    tag = await idx.get(client, "https://example/api", "int-1", "29")
+    assert tag is not None and tag.id == 29 and tag.name == "Poacher Sighting (Legacy)"
+    assert await idx.get(client, "https://example/api", "int-1", "Poacher Sighting") is None

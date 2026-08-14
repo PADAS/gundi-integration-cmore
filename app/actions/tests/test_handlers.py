@@ -363,6 +363,47 @@ async def test_event_field_mapping_skips_unknown_field(
     assert posted_fields == {101: "lion", 102: "3"}
 
 
+@pytest.mark.asyncio
+async def test_event_tag_and_fields_resolve_by_id(
+    mocker, integration, provider_info, event, metadata, fake_tag_info
+):
+    """Mapping keyed by immutable ids: one field by id, one by name, both
+    resolve to the same fieldIds on the wire. (Tag-level id resolution is
+    covered in test_tag_index — tag_index.get is mocked here.)"""
+    from app.actions.configurations import (
+        CmoreFieldMapping,
+        CmoreTagMapping,
+        DeliverConfig,
+    )
+    from app.actions.handlers import action_deliver
+
+    deliver_config = DeliverConfig(
+        event_type_to_tag=[
+            CmoreTagMapping(
+                event_type="lion_sighting",
+                tag="42",
+                field_mappings=[
+                    CmoreFieldMapping(event_details_key="species", cmore_field="101"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
+                ],
+            ),
+        ],
+    )
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
+
+    event.event_details = {"species": "lion", "count": 3}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags[0].tagId == 42
+    assert {v.fieldId for v in posted.tags[0].values} == {101, 102}
+    assert result["event_posted"] is True
+
+
 def test_stringify_for_cmore_handles_common_types():
     from datetime import datetime, timezone
 
