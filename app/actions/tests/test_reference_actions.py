@@ -77,7 +77,7 @@ def mock_cmore_client(mocker):
 
 
 @pytest.mark.asyncio
-async def test_list_tag_names_returns_all_tags_grouped_by_domain(
+async def test_list_tag_names_returns_id_values_with_name_labels(
     integration, mock_cmore_client
 ):
     from app.actions.configurations import ListTagNamesQuery
@@ -85,13 +85,37 @@ async def test_list_tag_names_returns_all_tags_grouped_by_domain(
 
     result = await action_list_tag_names(integration, ListTagNamesQuery())
 
-    values = [(o["value"], o["group"]) for o in result["options"]]
-    assert values == [
-        ("Animal Sighting", "Wildlife"),
-        ("Evidence of Poacher", "Wildlife"),
+    options = [(o["value"], o["label"], o["group"], o["description"]) for o in result["options"]]
+    assert options == [
+        ("21", "Animal Sighting", "Wildlife", "ID 21"),
+        ("20", "Evidence of Poacher", "Wildlife", "ID 20"),
     ]
     assert result["cache_ttl_seconds"] == 300
     mock_cmore_client.get_tags.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_tag_names_shows_both_tags_on_cross_domain_name_collision(
+    integration, mock_cmore_client
+):
+    """Same-named tags in two domains must BOTH appear (listed from by_id),
+    disambiguated by group — fixes the last-wins dropdown collapse."""
+    from unittest.mock import AsyncMock
+    from app.actions.configurations import ListTagNamesQuery
+    from app.actions.handlers import action_list_tag_names
+
+    mock_cmore_client.get_tags = AsyncMock(return_value=[
+        {"id": 1, "name": "DomainA", "tags": [
+            {"id": 10, "name": "Collision", "typeLimiter": "Incident", "fields": []},
+        ]},
+        {"id": 2, "name": "DomainB", "tags": [
+            {"id": 11, "name": "Collision", "typeLimiter": "Incident", "fields": []},
+        ]},
+    ])
+    result = await action_list_tag_names(integration, ListTagNamesQuery())
+    assert [(o["value"], o["group"]) for o in result["options"]] == [
+        ("10", "DomainA"), ("11", "DomainB"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -115,18 +139,20 @@ async def test_list_tag_names_propagates_upstream_errors(
 
 
 @pytest.mark.asyncio
-async def test_list_tag_fields_returns_fields_for_tag(integration, mock_cmore_client):
+async def test_list_tag_fields_accepts_id_and_name(integration, mock_cmore_client):
     from app.actions.configurations import ListTagFieldsQuery
     from app.actions.handlers import action_list_tag_fields
 
-    result = await action_list_tag_fields(
-        integration, ListTagFieldsQuery(tag_name="Evidence of Poacher")
-    )
-
-    assert [(o["value"], o["description"]) for o in result["options"]] == [
-        ("Reported By", "String"),
-        ("Evidence Type", "Lookup"),
+    expected = [
+        ("260", "Reported By", "String · ID 260"),
+        ("261", "Evidence Type", "Lookup · ID 261"),
     ]
+    by_id = await action_list_tag_fields(integration, ListTagFieldsQuery(tag="20"))
+    assert [(o["value"], o["label"], o["description"]) for o in by_id["options"]] == expected
+    by_name = await action_list_tag_fields(
+        integration, ListTagFieldsQuery(tag="Evidence of Poacher")
+    )
+    assert [(o["value"], o["label"], o["description"]) for o in by_name["options"]] == expected
 
 
 @pytest.mark.asyncio
@@ -135,24 +161,25 @@ async def test_list_tag_fields_unknown_tag_raises(integration, mock_cmore_client
     from app.actions.handlers import action_list_tag_fields
 
     with pytest.raises(ValueError, match="No Such Tag"):
-        await action_list_tag_fields(
-            integration, ListTagFieldsQuery(tag_name="No Such Tag")
-        )
+        await action_list_tag_fields(integration, ListTagFieldsQuery(tag="No Such Tag"))
 
 
 @pytest.mark.asyncio
-async def test_list_field_options_returns_lookup_values(integration, mock_cmore_client):
-    """Lookups are listed out of CMORE `order` in the raw fixture (Abalone
-    Harvesting=3, Camp=1), so this exercises the sort rather than happening
-    to pass with list order."""
+async def test_list_field_options_accepts_id_and_name(integration, mock_cmore_client):
+    """Option values stay lookup value STRINGS (CMORE matches by string);
+    only the tag/field selectors accept ids."""
     from app.actions.configurations import ListFieldOptionsQuery
     from app.actions.handlers import action_list_field_options
 
-    result = await action_list_field_options(
-        integration,
-        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Evidence Type"),
+    by_id = await action_list_field_options(
+        integration, ListFieldOptionsQuery(tag="20", field="261")
     )
-    assert [o["value"] for o in result["options"]] == ["Camp", "Abalone Harvesting"]
+    assert [o["value"] for o in by_id["options"]] == ["Camp", "Abalone Harvesting"]
+    by_name = await action_list_field_options(
+        integration,
+        ListFieldOptionsQuery(tag="Evidence of Poacher", field="Evidence Type"),
+    )
+    assert [o["value"] for o in by_name["options"]] == ["Camp", "Abalone Harvesting"]
 
 
 @pytest.mark.asyncio
@@ -195,7 +222,7 @@ async def test_list_field_options_sorts_missing_order_after_ordered_and_by_value
 
     result = await action_list_field_options(
         integration,
-        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Evidence Type"),
+        ListFieldOptionsQuery(tag="Evidence of Poacher", field="Evidence Type"),
     )
     assert [o["value"] for o in result["options"]] == [
         "Snare",
@@ -214,7 +241,7 @@ async def test_list_field_options_non_lookup_field_returns_empty(
 
     result = await action_list_field_options(
         integration,
-        ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="Reported By"),
+        ListFieldOptionsQuery(tag="Evidence of Poacher", field="Reported By"),
     )
     assert result["options"] == []
 
@@ -227,7 +254,7 @@ async def test_list_field_options_unknown_field_raises(integration, mock_cmore_c
     with pytest.raises(ValueError, match="No Such Field"):
         await action_list_field_options(
             integration,
-            ListFieldOptionsQuery(tag_name="Evidence of Poacher", field_name="No Such Field"),
+            ListFieldOptionsQuery(tag="Evidence of Poacher", field="No Such Field"),
         )
 
 

@@ -49,7 +49,7 @@ def suggest_cmore_field(
     """Best CMORE field for an ER field, or (None, best_score) below threshold."""
     best: Optional[FieldInfo] = None
     best_score = 0.0
-    for cmore_field in tag_info.fields.values():
+    for cmore_field in tag_info.fields_by_name.values():
         score = field_match_score(er_field, cmore_field)
         if score > best_score:
             best, best_score = cmore_field, score
@@ -73,6 +73,8 @@ def suggest_lookup_value(er_choice: ERChoice, cmore_field: FieldInfo) -> Optiona
 class FieldScaffold:
     event_details_key: str
     cmore_field_name: str
+    cmore_field_id: int = 0
+    cmore_field_type: str = ""
     value_mappings: List[dict] = field(default_factory=list)  # {from_value, to_value}
     # ER choices we could not map to a CMORE option (need a human decision).
     unresolved_choices: List[str] = field(default_factory=list)
@@ -82,24 +84,35 @@ class FieldScaffold:
 class ScaffoldResult:
     event_type: str
     tag_name: str
+    tag_id: int = 0
     fields: List[FieldScaffold] = field(default_factory=list)
     unmatched_er_fields: List[str] = field(default_factory=list)   # no CMORE field
     uncovered_cmore_fields: List[str] = field(default_factory=list)  # no ER field
 
     def to_config_entry(self) -> dict:
-        """Render as a CmoreTagMapping-shaped dict for the DeliverConfig."""
+        """Render as a CmoreTagMapping-shaped dict for the DeliverConfig.
+        Emits immutable ids (rename-proof); legend_lines() carries the names
+        for human review."""
         return {
             "event_type": self.event_type,
-            "tag_name": self.tag_name,
+            "tag": str(self.tag_id),
             "field_mappings": [
                 {
                     "event_details_key": f.event_details_key,
-                    "cmore_field_name": f.cmore_field_name,
+                    "cmore_field": str(f.cmore_field_id),
                     **({"value_mappings": f.value_mappings} if f.value_mappings else {}),
                 }
                 for f in self.fields
             ],
         }
+
+    def legend_lines(self) -> List[str]:
+        """Human-readable id ↔ name legend for the emitted config entry."""
+        lines = [f'tag {self.tag_id} = "{self.tag_name}"']
+        for f in self.fields:
+            suffix = f" ({f.cmore_field_type})" if f.cmore_field_type else ""
+            lines.append(f'field {f.cmore_field_id} = "{f.cmore_field_name}"{suffix}')
+        return lines
 
 
 def build_scaffold(
@@ -119,7 +132,7 @@ def build_scaffold(
       * unmatched choices get a blank ``to_value`` for the operator to fill
         (when ``include_unresolved_blanks``) and are also reported.
     """
-    result = ScaffoldResult(event_type=event_type, tag_name=tag_info.name)
+    result = ScaffoldResult(event_type=event_type, tag_name=tag_info.name, tag_id=tag_info.id)
     matched_cmore_names = set()
 
     for er_field in er_fields:
@@ -132,6 +145,8 @@ def build_scaffold(
         scaffold = FieldScaffold(
             event_details_key=er_field.key,
             cmore_field_name=cmore_field.name,
+            cmore_field_id=cmore_field.id,
+            cmore_field_type=cmore_field.data_type,
         )
 
         if er_field.is_enum and cmore_field.data_type in LOOKUP_TYPES:
@@ -153,6 +168,6 @@ def build_scaffold(
         result.fields.append(scaffold)
 
     result.uncovered_cmore_fields = [
-        name for name in tag_info.fields if name not in matched_cmore_names
+        name for name in tag_info.fields_by_name if name not in matched_cmore_names
     ]
     return result

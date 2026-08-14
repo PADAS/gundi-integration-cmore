@@ -1055,8 +1055,8 @@ Expected: `tag` present with type string; no `tag_name`; `base_url` in Authentic
 The branch is ready for PR. Do NOT push or open a PR — the user decides.
 
 **Post-merge/deploy manual checklist (for the operator — not executable by this plan):**
-1. Deploy to dev; re-register (dev runner has `REGISTER_ON_START=true`).
-2. Existing demo config will fail validation — re-enter the `rhino_carcass` mapping via the portal (dropdowns if portal PRs #340/#341 are deployed; otherwise free-text using IDs from the scaffold legend).
-3. Deliver a test event with `dev/send_event.py`; confirm the event lands in dev CMORE with the Rhino Carcass tag (`tagId` correct).
-4. In dev CMORE admin, rename the Rhino Carcass tag; deliver again; confirm the event still lands **with** the tag — the rename-proofing CSIR asked for.
-5. Rename the tag back.
+1. Deploy to dev; the runner re-registers on start (`REGISTER_ON_START=true`), which updates the registered schema. **Deploy and re-registration must be coupled:** until re-registration happens, the portal serves the old schema — the form shows the old `tag_name`/`cmore_field_name` fields (saves rejected as missing required `tag`) and dropdown cascades call reference actions with old param keys, which the renamed query models reject. For prod, confirm the deploy re-registers automatically or add a manual re-register step.
+2. Verify the dev and prod integrations' auth configs carry `base_url` BEFORE deploying — it is now required, and a config without it fails validation on the next fetch.
+3. Existing name-keyed demo configs stop validating — re-enter the `rhino_carcass` mapping via the portal (dropdowns if portal PRs #340/#341 are deployed; otherwise free-text using IDs from the scaffold legend). Deliveries in flight against an old-format config will error and retry between deploy and config re-entry (demo-only noise, not data loss).
+4. Deliver a test event with `dev/send_event.py`; confirm the event lands in dev CMORE with the Rhino Carcass tag (`tagId` correct).
+5. In dev CMORE admin, rename the Rhino Carcass tag; deliver again; confirm the event still lands **with** the tag — the rename-proofing CSIR asked for. Rename the tag back.

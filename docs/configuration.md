@@ -21,7 +21,7 @@ from the portal — run it to verify the token works before any data flows
 | Field | Required | Description |
 |---|---|---|
 | **API Token** | yes | CMORE API token (raw value, *without* the `Token ` prefix — the client adds it). Stored as a secret. |
-| **API Base URL** | — | CMORE API base, e.g. `https://cmorewc1.chpc.ac.za/za/WebAPI/api`. Note it includes the API path, not just the host. |
+| **API Base URL** | yes | CMORE API base for **your** instance: the instance's server + `/za/WebAPI/api` (e.g. `https://cmore.csir.co.za/za/WebAPI/api` on DFFE). URLs differ per CMORE deployment; note the value includes the API path, not just the host. |
 | **Owner Group ID** | yes | The CMORE **ShareGroupId** linked to this token. All events are posted to this group; it controls which CMORE users/teams can see the data. |
 
 > The token's ShareGroup must have **tag visibility** for any tags you map (a
@@ -42,13 +42,34 @@ Optional list mapping each Gundi `event_type` to a CMORE tag and its fields.
 Events whose type isn't listed still post (description + location + deep-link
 comment) but **without** a structured tag.
 
+> **Impact of an unmapped type:** untagged events show on the map but are
+> excluded from everything that relies on classification — tag-based
+> filtering and lookups, analytics, reporting, dashboards, and rule-based
+> workflows.
+
 Each entry (**CmoreTagMapping**):
 
 - **Gundi event_type** — the event_type string on incoming events (e.g. `rhino_carcass`).
-- **CMORE Tag Name** — the exact CMORE tag to attach (e.g. `Rhino Carcass`). Resolved to a tag id at runtime from CMORE's `/v2/tags/getfull`; must be visible to this integration's ShareGroup.
+- **CMORE Tag** — the tag **ID** (preferred — immutable, e.g. `8443`) or the exact tag name. Resolved at runtime from CMORE's `/v2/tags/getfull`; must be visible to this integration's ShareGroup. See [ref resolution](#how-tag-and-field-refs-are-resolved).
 - **Field Mappings** — list of **CmoreFieldMapping**:
-  - **Gundi event_details key** → **CMORE field name** (within the chosen tag).
+  - **Gundi event_details key** → **CMORE Field** (field ID preferred, or exact field name — within the chosen tag).
   - **Value Mappings** (optional) — list of `source value → CMORE value` pairs.
+
+#### How tag and field refs are resolved
+
+The **CMORE Tag** and **CMORE Field** values accept either the immutable
+numeric **ID** or the exact **name**:
+
+1. An all-digit value that matches an existing ID resolves **by ID**. This is
+   the preferred form — it keeps working when the tag or field is renamed in
+   CMORE. The portal's dropdowns store IDs automatically; the
+   [`scaffold-mapping`](#scaffolding-mappings-cli-alternative) tool emits IDs
+   and prints an id ↔ name legend.
+2. Anything else — or an all-digit value matching no ID — resolves by **exact
+   name**. Name-based refs break (events post unclassified, field values are
+   dropped) if the tag/field is renamed in CMORE.
+3. Edge case: a tag literally *named* "8443" while a different tag *has* ID
+   8443 resolves to the ID. Deterministic, and avoidable by using IDs.
 
 #### How field values are resolved
 
@@ -120,7 +141,7 @@ the Gundi portal (combobox with free-text entry). Options are fetched on
 demand — when you open a dropdown, never on page load — through the
 integrations' *reference actions*:
 
-- **CMORE-side fields** (`tag_name`, `cmore_field_name`, `to_value`, and the
+- **CMORE-side fields** (`tag`, `cmore_field`, `to_value`, and the
   classification fields) list live values from **this CMORE instance**: tag
   names, a tag's fields, a field's allowed options, and the classification
   tree.
@@ -132,7 +153,7 @@ integrations' *reference actions*:
   [reference actions](https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/)
   docs for details; classic v1 types can still be typed manually.
 
-Dropdowns cascade: picking a `tag_name` scopes the `cmore_field_name` list to
+Dropdowns cascade: picking a `tag` scopes the `cmore_field` list to
 that tag's fields; picking an `event_type` scopes `event_details_key`, and so
 on. Every field stays usable no matter what: while a parent value is empty, or
 if a fetch fails or nothing offers options, the field is a plain free-text
