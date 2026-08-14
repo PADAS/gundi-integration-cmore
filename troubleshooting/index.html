@@ -529,9 +529,17 @@ event still posts (description + location) but the tag is dropped.</p>
 </code></pre></div>
   Zero tags (or the domain missing) → a <strong>CMORE admin must subscribe the
   ShareGroup to the tag domain</strong>. The API can't do this; it's portal-admin only.</li>
-<li>Also confirm the configured <strong>Tag Name</strong> matches a real CMORE tag exactly, and
-  that an <code>event_type_to_tag</code> entry exists for the event's <code>event_type</code> (an
-  unmapped type posts with no tag by design).</li>
+<li>Also confirm the configured <strong>CMORE Tag</strong> ref resolves, and that an
+  <code>event_type_to_tag</code> entry exists for the event's <code>event_type</code> (an unmapped
+  type posts with no tag by design — note that untagged events are excluded
+  from CMORE's tag-based filtering, analytics, reporting, dashboards, and
+  rule-based workflows). Two ways a ref stops resolving:</li>
+<li><strong>ID-based ref</strong> (<code>"tag": "8443"</code>): the ID doesn't exist on this instance
+    — typo, or the config was copied from a different CMORE instance (IDs are
+    instance-specific).</li>
+<li><strong>Name-based ref</strong> (<code>"tag": "Rhino Carcass"</code>): the tag was renamed in
+    CMORE. Switch the mapping to the tag ID (the <code>get-tags</code> CLI output or the
+    scaffold legend shows it) — IDs survive renames.</li>
 </ul>
 <h2 id="a-specific-lookup-value-is-dropped">A specific lookup value is dropped<a class="headerlink" href="#a-specific-lookup-value-is-dropped" title="Permanent link">&para;</a></h2>
 <p>Log line:

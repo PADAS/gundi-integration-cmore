@@ -395,6 +395,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#how-tag-and-field-refs-are-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How tag and field refs are resolved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#how-field-values-are-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -574,8 +585,8 @@ from the portal — run it to verify the token works before any data flows
 </tr>
 <tr>
 <td><strong>API Base URL</strong></td>
-<td>—</td>
-<td>CMORE API base, e.g. <code>https://cmorewc1.chpc.ac.za/za/WebAPI/api</code>. Note it includes the API path, not just the host.</td>
+<td>yes</td>
+<td>CMORE API base for <strong>your</strong> instance: the instance's server + <code>/za/WebAPI/api</code> (e.g. <code>https://cmore.csir.co.za/za/WebAPI/api</code> on DFFE). URLs differ per CMORE deployment; note the value includes the API path, not just the host.</td>
 </tr>
 <tr>
 <td><strong>Owner Group ID</strong></td>
@@ -598,14 +609,35 @@ live under the single Deliver config.</p>
 <p>Optional list mapping each Gundi <code>event_type</code> to a CMORE tag and its fields.
 Events whose type isn't listed still post (description + location + deep-link
 comment) but <strong>without</strong> a structured tag.</p>
+<blockquote>
+<p><strong>Impact of an unmapped type:</strong> untagged events show on the map but are
+excluded from everything that relies on classification — tag-based
+filtering and lookups, analytics, reporting, dashboards, and rule-based
+workflows.</p>
+</blockquote>
 <p>Each entry (<strong>CmoreTagMapping</strong>):</p>
 <ul>
 <li><strong>Gundi event_type</strong> — the event_type string on incoming events (e.g. <code>rhino_carcass</code>).</li>
-<li><strong>CMORE Tag Name</strong> — the exact CMORE tag to attach (e.g. <code>Rhino Carcass</code>). Resolved to a tag id at runtime from CMORE's <code>/v2/tags/getfull</code>; must be visible to this integration's ShareGroup.</li>
+<li><strong>CMORE Tag</strong> — the tag <strong>ID</strong> (preferred — immutable, e.g. <code>8443</code>) or the exact tag name. Resolved at runtime from CMORE's <code>/v2/tags/getfull</code>; must be visible to this integration's ShareGroup. See <a href="#how-tag-and-field-refs-are-resolved">ref resolution</a>.</li>
 <li><strong>Field Mappings</strong> — list of <strong>CmoreFieldMapping</strong>:</li>
-<li><strong>Gundi event_details key</strong> → <strong>CMORE field name</strong> (within the chosen tag).</li>
+<li><strong>Gundi event_details key</strong> → <strong>CMORE Field</strong> (field ID preferred, or exact field name — within the chosen tag).</li>
 <li><strong>Value Mappings</strong> (optional) — list of <code>source value → CMORE value</code> pairs.</li>
 </ul>
+<h4 id="how-tag-and-field-refs-are-resolved">How tag and field refs are resolved<a class="headerlink" href="#how-tag-and-field-refs-are-resolved" title="Permanent link">&para;</a></h4>
+<p>The <strong>CMORE Tag</strong> and <strong>CMORE Field</strong> values accept either the immutable
+numeric <strong>ID</strong> or the exact <strong>name</strong>:</p>
+<ol>
+<li>An all-digit value that matches an existing ID resolves <strong>by ID</strong>. This is
+   the preferred form — it keeps working when the tag or field is renamed in
+   CMORE. The portal's dropdowns store IDs automatically; the
+   <a href="#scaffolding-mappings-cli-alternative"><code>scaffold-mapping</code></a> tool emits IDs
+   and prints an id ↔ name legend.</li>
+<li>Anything else — or an all-digit value matching no ID — resolves by <strong>exact
+   name</strong>. Name-based refs break (events post unclassified, field values are
+   dropped) if the tag/field is renamed in CMORE.</li>
+<li>Edge case: a tag literally <em>named</em> "8443" while a different tag <em>has</em> ID
+   8443 resolves to the ID. Deterministic, and avoidable by using IDs.</li>
+</ol>
 <h4 id="how-field-values-are-resolved">How field values are resolved<a class="headerlink" href="#how-field-values-are-resolved" title="Permanent link">&para;</a></h4>
 <p>Per the CMORE field's data type:</p>
 <ul>
@@ -671,7 +703,7 @@ the Gundi portal (combobox with free-text entry). Options are fetched on
 demand — when you open a dropdown, never on page load — through the
 integrations' <em>reference actions</em>:</p>
 <ul>
-<li><strong>CMORE-side fields</strong> (<code>tag_name</code>, <code>cmore_field_name</code>, <code>to_value</code>, and the
+<li><strong>CMORE-side fields</strong> (<code>tag</code>, <code>cmore_field</code>, <code>to_value</code>, and the
   classification fields) list live values from <strong>this CMORE instance</strong>: tag
   names, a tag's fields, a field's allowed options, and the classification
   tree.</li>
@@ -683,7 +715,7 @@ integrations' <em>reference actions</em>:</p>
   <a href="https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/">reference actions</a>
   docs for details; classic v1 types can still be typed manually.</li>
 </ul>
-<p>Dropdowns cascade: picking a <code>tag_name</code> scopes the <code>cmore_field_name</code> list to
+<p>Dropdowns cascade: picking a <code>tag</code> scopes the <code>cmore_field</code> list to
 that tag's fields; picking an <code>event_type</code> scopes <code>event_details_key</code>, and so
 on. Every field stays usable no matter what: while a parent value is empty, or
 if a fetch fails or nothing offers options, the field is a plain free-text
