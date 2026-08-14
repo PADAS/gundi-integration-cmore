@@ -90,11 +90,11 @@ class ScaffoldResult:
         """Render as a CmoreTagMapping-shaped dict for the DeliverConfig."""
         return {
             "event_type": self.event_type,
-            "tag_name": self.tag_name,
+            "tag": self.tag_name,
             "field_mappings": [
                 {
                     "event_details_key": f.event_details_key,
-                    "cmore_field_name": f.cmore_field_name,
+                    "cmore_field": f.cmore_field_name,
                     **({"value_mappings": f.value_mappings} if f.value_mappings else {}),
                 }
                 for f in self.fields

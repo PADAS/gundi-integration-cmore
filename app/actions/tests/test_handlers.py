@@ -91,10 +91,10 @@ def deliver_config():
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="lion_sighting",
-                tag_name="Wildlife Sighting",
+                tag="Wildlife Sighting",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
-                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
+                    CmoreFieldMapping(event_details_key="species", cmore_field="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
                 ],
             ),
         ],
@@ -337,11 +337,11 @@ async def test_event_field_mapping_skips_unknown_field(
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="lion_sighting",
-                tag_name="Wildlife Sighting",
+                tag="Wildlife Sighting",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="species", cmore_field_name="Species"),
-                    CmoreFieldMapping(event_details_key="count", cmore_field_name="Count"),
-                    CmoreFieldMapping(event_details_key="made_up", cmore_field_name="Nonexistent"),
+                    CmoreFieldMapping(event_details_key="species", cmore_field="Species"),
+                    CmoreFieldMapping(event_details_key="count", cmore_field="Count"),
+                    CmoreFieldMapping(event_details_key="made_up", cmore_field="Nonexistent"),
                 ],
             ),
         ],
@@ -432,7 +432,7 @@ def test_resolve_field_values_applies_value_mapping_then_lookup():
                     lookups=_lookup("Adult", "Sub-Adult", "Calf"))
     fm = CmoreFieldMapping(
         event_details_key="age_of_animal",
-        cmore_field_name="Animal Age",
+        cmore_field="Animal Age",
         value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
     )
     assert _resolve_field_values(age, fm, "b_3_months1_year") == ["Calf"]
@@ -442,7 +442,7 @@ def test_resolve_field_values_supports_multi_value_lookup():
     """A multi-value lookup field expands a list into several resolved values."""
     evidence = FieldInfo(id=261, name="Evidence Type", data_type="Lookup",
                          allow_multiple=True, lookups=_lookup("Snare", "Trap", "Net"))
-    fm = CmoreFieldMapping(event_details_key="evidence", cmore_field_name="Evidence Type")
+    fm = CmoreFieldMapping(event_details_key="evidence", cmore_field="Evidence Type")
     assert _resolve_field_values(evidence, fm, ["snare", "net"]) == ["Snare", "Net"]
 
 
@@ -483,24 +483,24 @@ async def test_deliver_rhino_carcass_resolves_lookups(
         event_type_to_tag=[
             CmoreTagMapping(
                 event_type="rhino_carcass",
-                tag_name="Rhino Carcass",
+                tag="Rhino Carcass",
                 field_mappings=[
-                    CmoreFieldMapping(event_details_key="animal_sex", cmore_field_name="Animal Sex"),
+                    CmoreFieldMapping(event_details_key="animal_sex", cmore_field="Animal Sex"),
                     CmoreFieldMapping(
-                        event_details_key="animal_common_name", cmore_field_name="Rhino Spesies",
+                        event_details_key="animal_common_name", cmore_field="Rhino Spesies",
                         value_mappings=[CmoreValueMapping(from_value="Black Rhino", to_value="Black")],
                     ),
                     CmoreFieldMapping(
-                        event_details_key="age_of_animal", cmore_field_name="Animal Age",
+                        event_details_key="age_of_animal", cmore_field="Animal Age",
                         value_mappings=[CmoreValueMapping(from_value="b_3_months1_year", to_value="Calf")],
                     ),
                     CmoreFieldMapping(
-                        event_details_key="age_of_carcass", cmore_field_name="Carcass Age",
+                        event_details_key="age_of_carcass", cmore_field="Carcass Age",
                         value_mappings=[CmoreValueMapping(from_value="very_fresh", to_value="Today")],
                     ),
                     # 'fence' maps to no valid Kill Type option → dropped.
-                    CmoreFieldMapping(event_details_key="cause_of_death", cmore_field_name="Kill Type"),
-                    CmoreFieldMapping(event_details_key="animal_id", cmore_field_name="Skull Tag Number"),
+                    CmoreFieldMapping(event_details_key="cause_of_death", cmore_field="Kill Type"),
+                    CmoreFieldMapping(event_details_key="animal_id", cmore_field="Skull Tag Number"),
                 ],
             ),
         ],

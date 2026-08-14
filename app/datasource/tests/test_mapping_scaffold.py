@@ -177,5 +177,5 @@ def test_build_scaffold_on_rhino_carcass():
     # The rendered config entry is CmoreTagMapping-shaped.
     entry = result.to_config_entry()
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag_name"] == "Rhino Carcass"
-    assert any(fm["cmore_field_name"] == "Animal Sex" for fm in entry["field_mappings"])
+    assert entry["tag"] == "Rhino Carcass"
+    assert any(fm["cmore_field"] == "Animal Sex" for fm in entry["field_mappings"])

@@ -497,12 +497,12 @@ async def _build_event_tag(
     the event still gets posted (with description + location), just without
     the structured tag.
     """
-    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag_name)
+    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag)
     if tag_info is None:
         logger.warning(
             "CMORE tag %r not found on instance; dropping tag from event "
             "(event_type=%r). Event will still post with description/location only.",
-            mapping.tag_name,
+            mapping.tag,
             event.event_type,
         )
         return None
@@ -521,13 +521,13 @@ async def _build_event_tag(
     values = []
     for fm in (mapping.field_mappings or []):
         ed_key = fm.event_details_key
-        field_name = fm.cmore_field_name
-        field_info = tag_info.resolve_field(field_name)
+        field_ref = fm.cmore_field
+        field_info = tag_info.resolve_field(field_ref)
         if field_info is None:
             logger.warning(
                 "CMORE tag %r has no field %r; skipping event_details key %r.",
                 tag_info.name,
-                field_name,
+                field_ref,
                 ed_key,
             )
             continue

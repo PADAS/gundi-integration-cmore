@@ -60,20 +60,20 @@ def test_find_action_config_locates_push_config():
 
 def test_merge_event_type_mapping_replaces_same_event_type():
     existing = {"event_type_to_tag": [
-        {"event_type": "rhino_carcass", "tag_name": "OLD"},
-        {"event_type": "shot", "tag_name": "Shot"},
+        {"event_type": "rhino_carcass", "tag": "OLD"},
+        {"event_type": "shot", "tag": "Shot"},
     ]}
-    entry = {"event_type": "rhino_carcass", "tag_name": "Rhino Carcass", "field_mappings": []}
+    entry = {"event_type": "rhino_carcass", "tag": "Rhino Carcass", "field_mappings": []}
     merged = merge_event_type_mapping(existing, entry)
     rhino = [m for m in merged["event_type_to_tag"] if m["event_type"] == "rhino_carcass"]
-    assert len(rhino) == 1 and rhino[0]["tag_name"] == "Rhino Carcass"
+    assert len(rhino) == 1 and rhino[0]["tag"] == "Rhino Carcass"
     # The unrelated mapping is preserved; input is not mutated.
     assert any(m["event_type"] == "shot" for m in merged["event_type_to_tag"])
-    assert existing["event_type_to_tag"][0]["tag_name"] == "OLD"
+    assert existing["event_type_to_tag"][0]["tag"] == "OLD"
 
 
 def test_merge_into_empty_deliver_data():
-    entry = {"event_type": "rhino_carcass", "tag_name": "Rhino Carcass", "field_mappings": []}
+    entry = {"event_type": "rhino_carcass", "tag": "Rhino Carcass", "field_mappings": []}
     assert merge_event_type_mapping({}, entry)["event_type_to_tag"] == [entry]
 
 
@@ -132,7 +132,7 @@ def test_interactive_picker_and_value_fill(tmp_path):
     ], input="1\n3\n2\n1\n")
     assert result.exit_code == 0, result.output
 
-    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # male/female auto-resolve (display match) → only 'unknown' mapped.
     assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
     # The picker wired 'species' → Rhino Spesies; both values filled by number.
@@ -202,7 +202,7 @@ async def test_interactive_fill_keeps_existing_mapping_as_default(mocker):
         )],
     )
     existing_entry = {"field_mappings": [{
-        "event_details_key": "age_of_animal", "cmore_field_name": "Animal Age",
+        "event_details_key": "age_of_animal", "cmore_field": "Animal Age",
         "value_mappings": [{"from_value": "b_3_months1_year", "to_value": "Calf"}],
     }]}
 
@@ -232,7 +232,7 @@ def test_interactive_next_and_back_navigation(tmp_path):
     ], input="1\nn\nb\n3\n2\n1\n")
     assert result.exit_code == 0, result.output
 
-    by_field = {fm["cmore_field_name"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in json.loads(out_file.read_text())["field_mappings"]}
     # Going back let us set Animal Sex after initially skipping it.
     assert by_field["Animal Sex"]["value_mappings"] == [{"from_value": "unknown", "to_value": "Indeterminable"}]
     species = by_field["Rhino Spesies"]["value_mappings"]
@@ -278,9 +278,9 @@ def test_scaffold_mapping_offline_end_to_end(tmp_path):
 
     entry = json.loads(out_file.read_text())
     assert entry["event_type"] == "rhino_carcass"
-    assert entry["tag_name"] == "Rhino Carcass"
+    assert entry["tag"] == "Rhino Carcass"
 
-    by_field = {fm["cmore_field_name"]: fm for fm in entry["field_mappings"]}
+    by_field = {fm["cmore_field"]: fm for fm in entry["field_mappings"]}
     # animal_sex: female/male auto-resolve (display match); only 'Unknown' is left.
     sex_maps = by_field["Animal Sex"].get("value_mappings", [])
     assert sex_maps == [{"from_value": "Unknown", "to_value": ""}]

@@ -409,7 +409,9 @@ async def _interactive_fill(result, tag_info, er_fields, existing_entry=None):
     existing_field_by_key = {}
     existing_value_by_key = {}
     for fm in (existing_entry or {}).get("field_mappings", []):
-        existing_field_by_key[fm.get("event_details_key")] = fm.get("cmore_field_name")
+        ref = fm.get("cmore_field")
+        fi = tag_info.resolve_field(str(ref)) if ref is not None else None
+        existing_field_by_key[fm.get("event_details_key")] = fi.name if fi else ref
         existing_value_by_key[fm.get("event_details_key")] = {
             vm["from_value"]: vm["to_value"]
             for vm in fm.get("value_mappings", []) if vm.get("to_value")
@@ -578,11 +580,13 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
         if not resolved_tag:
             # Pick the CMORE tag from a menu (arrow-key on a TTY) rather than
             # making the operator type the exact name.
+            existing_ref = (existing_entry or {}).get("tag")
+            existing_tag = index.resolve(str(existing_ref)) if existing_ref else None
             titles = [f"{name}  ({index.by_name[name].domain})" for name in sorted(index.by_name)]
             resolved_tag = await _choose(
                 f"Select the CMORE tag to map '{event_type}' events to:",
                 sorted(index.by_name), titles=titles, skip_label=None,
-                default=(existing_entry or {}).get("tag_name"),
+                default=existing_tag.name if existing_tag else None,
             )
         tag_info = index.resolve(str(resolved_tag)) if resolved_tag else None
         if tag_info is None:
