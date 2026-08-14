@@ -234,12 +234,14 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
    internal name (ask your EarthRanger admin, or check the event type's
    value in the ER admin — it's the lowercase name with underscores, not the
    display name).
-2. **CMORE Tag Name**: `Rhino Carcass` — exactly as the tag is spelled in
-   CMORE's tag chooser.
+2. **CMORE Tag**: the tag's **ID** (preferred — it keeps working if the tag
+   is ever renamed; the `scaffold-mapping` tool's legend shows it, and the
+   portal's dropdown stores it automatically) or the tag name `Rhino
+   Carcass` spelled exactly as in CMORE's tag chooser.
 3. **Field Mappings** — one row per detail you want carried over. Our test
    system maps six:
 
-   | Gundi event_details key (from ER) | CMORE field name |
+   | Gundi event_details key (from ER) | CMORE field (name or ID) |
    |---|---|
    | `animal_sex` | `Animal Sex` |
    | `age_of_animal` | `Animal Age` |
@@ -250,6 +252,8 @@ In **Deliver**, add an entry to **Event type → CMORE tag**:
 
    (Yes, "Rhino Spesies" — use CMORE's spelling exactly as it appears in the
    tag.)
+   Field IDs work here too and are rename-proof — the scaffold tool emits
+   them for you.
 
    ![The rhino_carcass → Rhino Carcass mapping in the Deliver config](images/gundi-05-deliver-mapping.png)
 
