@@ -146,10 +146,12 @@ integrations' *reference actions*:
   names, a tag's fields, a field's allowed options, and the classification
   tree.
 - **EarthRanger-side fields** (`event_type`, `event_details_key`,
-  `from_value`) list live values from the **connected EarthRanger
-  provider(s)**: event types (grouped by category), an event type's fields,
-  and a choice field's values. Only **v2** ER event types are offered — see
-  the ER runner's
+  `from_value`, and `subject_type` in the subject-mapping lists) list live
+  values from the **connected EarthRanger provider(s)**: event types (grouped
+  by category), an event type's fields, a choice field's values, and the
+  subject subtypes observed on the site (grouped by subject type, with the
+  types themselves offered as fallback options). Only **v2** ER event types
+  are offered — see the ER runner's
   [reference actions](https://padas.github.io/gundi-integration-earthranger/actions/reference-actions/)
   docs for details; classic v1 types can still be typed manually.
 
