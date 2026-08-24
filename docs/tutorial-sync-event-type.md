@@ -64,9 +64,10 @@ You need working logins for all three systems:
 > 1. **An organisation (share group) on the CMORE instance**, with your CMORE
 >    user in it. Organisations and share groups are created by the CMORE team.
 > 2. **The Integration permission on your CMORE account.** Creating and
->    managing an external service (Part 1.2) requires it. If the Admin Site
->    doesn't show the **Service** menu, you don't have it — contact the CMORE
->    team.
+>    managing an external service (Part 1.2) requires it. The check is
+>    self-evidencing: if the Admin Site shows the **Service** menu and you can
+>    create a service and view its API key, you have the permission. If the
+>    **Service** menu is missing, you don't — contact the CMORE team.
 > 3. **Access to the tag domain you need.** Tags live in *tag domains* (for
 >    example, the **Wildlife** domain contains Rhino Carcass, Poacher
 >    Sighting, Wounded Rhino and 14 more). Your share group can only use tags
@@ -75,6 +76,11 @@ You need working logins for all three systems:
 >    marked as Stop Rhino Poaching intellectual property — are restricted and
 >    granted case-by-case. Tell the CMORE team **which tags you want to use
 >    and which share group needs them**.
+>
+> These three grants are independent — having one doesn't imply the others.
+> In particular, successfully creating a service and API key (item 2) does
+> **not** mean your share group or tag domains are set up; those can still
+> fail later, at delivery time.
 >
 > Everything else in this guide — creating the service, getting the API key,
 > finding your share group ID, mapping fields — you can do yourself.

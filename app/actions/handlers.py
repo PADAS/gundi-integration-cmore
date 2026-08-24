@@ -26,7 +26,7 @@ from app.datasource.schemas import (
     CmoreVirtualClientRequest,
     UploadType,
 )
-from app.datasource.tag_index import TagIndexData, tag_index, _build_index
+from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
@@ -68,25 +68,35 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
         return {"valid_credentials": False, "error": "base_url and token are required."}
     try:
         async with CmoreClient(base_url=action_config.base_url, token=token) as client:
-            await client.get_tags()
+            # gateway_mapping is a tiny authenticated read (401 on a bad token)
+            # that also proves the token belongs to a service. get_tags would
+            # prove tag visibility too, but takes ~25s on production catalogs
+            # (DFFE) — past the portal's patience for "test credentials". Tag
+            # visibility is covered by the validate CLI and reference actions.
+            await client.get_gateway_mapping()
     except Exception as e:
         return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
     return {"valid_credentials": True}
 
 
-async def _fetch_tag_index(integration: Integration) -> TagIndexData:
-    """Fresh tag fetch for reference actions (config-time UX).
+# Short-TTL tag cache for reference actions (config-time UX). Separate from
+# the no-TTL delivery singleton: config forms should reflect current CMORE
+# state, but "fresh within a couple of minutes" is fresh enough — production
+# get_tags takes ~25s (DFFE), so the dropdown cascade (tag → fields → options)
+# must not pay that once per dropdown.
+REFERENCE_TAGS_TTL_SECONDS = 120
+reference_tag_index = TagIndex(ttl_seconds=REFERENCE_TAGS_TTL_SECONDS)
 
-    Deliberately bypasses the module-level tag_index cache: that cache is
-    per-process with no TTL, tuned for per-event delivery cost. A config
-    form fetch must reflect current CMORE state.
-    """
+
+async def _fetch_tag_index(integration: Integration) -> TagIndexData:
+    """Tag index for reference actions, cached for REFERENCE_TAGS_TTL_SECONDS."""
     auth = _get_auth_config(integration)
     async with CmoreClient(
         base_url=auth.base_url, token=auth.token.get_secret_value()
     ) as client:
-        raw = await client.get_tags()
-    return _build_index(raw)
+        return await reference_tag_index.get_index(
+            client, auth.base_url, str(integration.id)
+        )
 
 
 async def action_list_tag_names(

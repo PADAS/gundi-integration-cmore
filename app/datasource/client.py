@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 10.0
 
+# /v2/tags/getfull is the one heavy endpoint: production tag catalogs can be
+# ~2MB and take ~25s of server-side query time before the first byte (seen on
+# cmore.csir.co.za). Applied per-request so every other call keeps the fast
+# DEFAULT_TIMEOUT.
+TAGS_TIMEOUT = 120.0
+
 
 def _giveup_on_client_error(exc: Exception) -> bool:
     """Don't retry on 4xx status errors — they won't succeed on retry."""
@@ -61,6 +67,9 @@ class CmoreClient:
                 raw = raw[6:].strip()
             headers["Authorization"] = f"Token {raw}"
         self._client = httpx.AsyncClient(base_url=base_url, headers=headers, timeout=timeout)
+        # get_tags always gets at least TAGS_TIMEOUT, but an explicitly larger
+        # client timeout (e.g. `validate --timeout 300`) wins.
+        self._tags_timeout = max(TAGS_TIMEOUT, timeout)
 
     async def __aenter__(self):
         return self
@@ -104,12 +113,22 @@ class CmoreClient:
         response.raise_for_status()
         return _safe_json(response, {})
 
-    @retry_transient
-    async def post_event(self, event: CmoreEvent) -> dict:
+    async def post_event_once(self, event: CmoreEvent) -> dict:
+        """Single, non-retried event POST.
+
+        For callers that must not duplicate this non-idempotent write —
+        e.g. the validate CLI's --probe-event, which promises exactly one
+        visible test event. A lost response on the retried path could
+        create up to five.
+        """
         payload = json.loads(event.json(exclude_none=True))
         response = await self._client.post("/v2/messages/events", json=payload)
         response.raise_for_status()
         return _safe_json(response, {})
+
+    @retry_transient
+    async def post_event(self, event: CmoreEvent) -> dict:
+        return await self.post_event_once(event)
 
     @retry_transient
     async def post_comment(self, comment: CmoreComment) -> dict:
@@ -152,7 +171,7 @@ class CmoreClient:
 
     @retry_transient
     async def get_tags(self) -> list:
-        response = await self._client.get("/v2/tags/getfull")
+        response = await self._client.get("/v2/tags/getfull", timeout=self._tags_timeout)
         response.raise_for_status()
         return _safe_json(response, [])
 

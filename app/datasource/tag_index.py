@@ -11,12 +11,16 @@ reuse it. Process restart refreshes the cache.
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .client import CmoreClient
 
 logger = logging.getLogger(__name__)
+
+# Injection point for tests; monotonic so wall-clock changes can't expire caches.
+_now = time.monotonic
 
 
 @dataclass
@@ -135,10 +139,20 @@ class TagIndex:
     one integration's empty view poisons the other's resolution.
     """
 
-    def __init__(self) -> None:
-        # Key: (base_url, integration_id) → TagIndexData
-        self._cache: Dict[tuple, TagIndexData] = {}
-        self._lock = asyncio.Lock()
+    def __init__(self, ttl_seconds: Optional[float] = None) -> None:
+        # ttl_seconds=None (the delivery-path default) caches for the process
+        # lifetime — restart refreshes. A finite TTL is for config-time use
+        # (reference actions), where "fresh within a couple of minutes" beats
+        # paying the ~25s production get_tags fetch on every form interaction.
+        self._ttl_seconds = ttl_seconds
+        # Key: (base_url, integration_id) → (TagIndexData, fetched_at)
+        self._cache: Dict[tuple, tuple] = {}
+        # Per-key locks: fetches are single-flight per (base_url, integration)
+        # but never serialize across keys — one cache-wide lock held across a
+        # ~25s production get_tags fetch would make N integrations wait ~N×25s.
+        # setdefault is atomic enough here: asyncio is single-threaded and
+        # there is no await between the lookup and the insert.
+        self._locks: Dict[tuple, asyncio.Lock] = {}
 
     async def get(
         self,
@@ -151,17 +165,26 @@ class TagIndex:
         index = await self._ensure_loaded(client, base_url, integration_id)
         return index.resolve(tag_ref)
 
+    async def get_index(
+        self, client: CmoreClient, base_url: str, integration_id: str
+    ) -> TagIndexData:
+        """The full (cached) index — for callers that enumerate tags/fields
+        (reference actions) rather than resolving one ref."""
+        return await self._ensure_loaded(client, base_url, integration_id)
+
     async def _ensure_loaded(
         self, client: CmoreClient, base_url: str, integration_id: str
     ) -> TagIndexData:
         key = (base_url, integration_id)
-        if key in self._cache:
-            return self._cache[key]
-        async with self._lock:
+        cached = self._get_fresh(key)
+        if cached is not None:
+            return cached
+        async with self._locks.setdefault(key, asyncio.Lock()):
             # Double-check after acquiring the lock — another coroutine may
             # have populated while we were waiting.
-            if key in self._cache:
-                return self._cache[key]
+            cached = self._get_fresh(key)
+            if cached is not None:
+                return cached
             raw = await client.get_tags()
             index = _build_index(raw)
             logger.info(
@@ -171,12 +194,22 @@ class TagIndex:
                 integration_id,
                 len(index.by_id),
             )
-            self._cache[key] = index
+            self._cache[key] = (index, _now())
             return index
+
+    def _get_fresh(self, key) -> Optional[TagIndexData]:
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        index, fetched_at = entry
+        if self._ttl_seconds is not None and _now() - fetched_at > self._ttl_seconds:
+            return None
+        return index
 
     def _reset(self) -> None:
         """Test helper — drop the cache."""
         self._cache.clear()
+        self._locks.clear()
 
 
 # Module-level singleton used by handlers.

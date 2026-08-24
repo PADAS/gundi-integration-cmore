@@ -1363,3 +1363,67 @@ async def test_deliver_event_skips_deep_link_comment_when_no_message_id(
 
     inner.post_event.assert_awaited_once()
     inner.post_comment.assert_not_awaited()
+
+
+# ----- action_auth -----
+
+
+def _mock_cmore_client_cls(mocker, instance):
+    """Patch handlers.CmoreClient so `async with CmoreClient(...)` yields ``instance``."""
+    from app.actions import handlers as handlers_module
+
+    client_cls = MagicMock()
+    client_cls.return_value.__aenter__ = AsyncMock(return_value=instance)
+    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    mocker.patch.object(handlers_module, "CmoreClient", client_cls)
+    return client_cls
+
+
+@pytest.mark.asyncio
+async def test_action_auth_probes_gateway_mapping_not_the_heavy_tags_endpoint(
+    mocker, integration
+):
+    # /v2/tags/getfull takes ~25s on production catalogs (DFFE), which made the
+    # portal's "test credentials" button time out. gateway_mapping is a ~1s
+    # authenticated read with the same 401 semantics.
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(return_value=[])
+    instance.get_tags = AsyncMock()
+    _mock_cmore_client_cls(mocker, instance)
+
+    config = AuthenticateConfig(
+        token="secret", base_url="https://cmore.test/api", owner_group_id=1
+    )
+    result = await action_auth(integration, config)
+
+    assert result == {"valid_credentials": True}
+    instance.get_gateway_mapping.assert_awaited_once()
+    instance.get_tags.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_action_auth_reports_invalid_credentials_on_error(mocker, integration):
+    import httpx
+
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+
+    request = httpx.Request("GET", "https://cmore.test/api")
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "401", request=request, response=httpx.Response(401, request=request)
+        )
+    )
+    _mock_cmore_client_cls(mocker, instance)
+
+    config = AuthenticateConfig(
+        token="bad", base_url="https://cmore.test/api", owner_group_id=1
+    )
+    result = await action_auth(integration, config)
+
+    assert result["valid_credentials"] is False
+    assert "401" in result["error"]

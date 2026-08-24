@@ -316,3 +316,21 @@ async def test_list_classification_values_unknown_branch_raises(
         await action_list_classification_values(
             integration, ListClassificationValuesQuery(battleDimension="SEA")
         )
+
+
+@pytest.mark.asyncio
+async def test_reference_actions_share_a_ttl_cached_tag_fetch(
+    integration, mock_cmore_client
+):
+    """The dropdown cascade (tag → fields → options) must not pay the ~25s
+    production get_tags fetch once per dropdown — calls within the TTL window
+    reuse one fetch."""
+    from app.actions import handlers as handlers_module
+    from app.actions.configurations import ListTagNamesQuery
+    from app.actions.handlers import action_list_tag_names
+
+    handlers_module.reference_tag_index._reset()
+    await action_list_tag_names(integration, ListTagNamesQuery())
+    await action_list_tag_names(integration, ListTagNamesQuery())
+
+    assert mock_cmore_client.get_tags.await_count == 1

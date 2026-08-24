@@ -335,3 +335,99 @@ async def test_id_mapping_survives_tag_rename():
     tag = await idx.get(client, "https://example/api", "int-1", "29")
     assert tag is not None and tag.id == 29 and tag.name == "Poacher Sighting (Legacy)"
     assert await idx.get(client, "https://example/api", "int-1", "Poacher Sighting") is None
+
+
+# ----- TTL expiry -----
+
+
+@pytest.mark.asyncio
+async def test_tag_index_with_ttl_serves_from_cache_within_window(monkeypatch):
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    client = _make_client_with_get_tags(_sample_response())
+
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    clock["now"] += 119
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+
+    assert client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tag_index_with_ttl_refetches_after_expiry(monkeypatch):
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    client = _make_client_with_get_tags(_sample_response())
+
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    clock["now"] += 121
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+
+    assert client.get_tags.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_tag_index_without_ttl_never_expires(monkeypatch):
+    # The delivery-path singleton keeps its refresh-on-restart semantics.
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex()
+    client = _make_client_with_get_tags(_sample_response())
+
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    clock["now"] += 10**9
+    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+
+    assert client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tag_index_get_index_returns_full_index():
+    idx = TagIndex(ttl_seconds=120)
+    client = _make_client_with_get_tags(_sample_response())
+
+    index = await idx.get_index(client, "https://example/api", "int-1")
+
+    assert index.resolve("Poacher Sighting") is not None
+    assert client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tag_index_fetches_for_different_keys_do_not_serialize():
+    # A single cache-wide lock held across the ~25s production get_tags fetch
+    # would make N integrations wait ~N×25s. Fetches for different keys must
+    # proceed concurrently; only same-key fetches are single-flight.
+    import asyncio
+
+    idx = TagIndex()
+    gate = asyncio.Event()
+
+    async def slow_tags():
+        await gate.wait()
+        return _sample_response()
+
+    client_a = MagicMock()
+    client_a.get_tags = AsyncMock(side_effect=slow_tags)
+    client_b = _make_client_with_get_tags(_sample_response())
+
+    task_a = asyncio.create_task(
+        idx.get(client_a, "https://a/api", "int-a", "Poacher Sighting")
+    )
+    await asyncio.sleep(0)  # let task_a enter its fetch and hold its lock
+
+    # With per-key locking, B's fetch completes while A's is still in flight.
+    tag_b = await asyncio.wait_for(
+        idx.get(client_b, "https://b/api", "int-b", "Poacher Sighting"), timeout=1.0
+    )
+    assert tag_b is not None
+
+    gate.set()
+    assert (await task_a) is not None
