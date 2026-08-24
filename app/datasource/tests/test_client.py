@@ -46,3 +46,34 @@ async def test_client_has_no_default_content_type_header():
     assert "content-type" not in client._client.headers
     assert client._client.headers["Authorization"] == "Token abc"
     await client._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_get_tags_uses_long_per_request_timeout():
+    # /v2/tags/getfull is the one heavy endpoint: production catalogs (DFFE)
+    # take ~25s server-side before the first byte. The long timeout applies
+    # per-request so delivery POSTs keep the fast client default.
+    from app.datasource.client import TAGS_TIMEOUT
+
+    client = CmoreClient(base_url="https://cmore.test", token="abc")
+    client._client.get = AsyncMock(return_value=_ok_response([]))
+
+    await client.get_tags()
+
+    _, kwargs = client._client.get.await_args
+    assert kwargs["timeout"] == TAGS_TIMEOUT
+    assert TAGS_TIMEOUT >= 120.0
+    await client._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_get_tags_timeout_respects_larger_client_timeout():
+    # `validate --timeout 300` must not be silently capped by TAGS_TIMEOUT.
+    client = CmoreClient(base_url="https://cmore.test", token="abc", timeout=300.0)
+    client._client.get = AsyncMock(return_value=_ok_response([]))
+
+    await client.get_tags()
+
+    _, kwargs = client._client.get.await_args
+    assert kwargs["timeout"] == 300.0
+    await client._client.aclose()
