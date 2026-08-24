@@ -543,7 +543,7 @@ event still posts (description + location) but the tag is dropped.</p>
 </ul>
 <h2 id="a-specific-lookup-value-is-dropped">A specific lookup value is dropped<a class="headerlink" href="#a-specific-lookup-value-is-dropped" title="Permanent link">&para;</a></h2>
 <p>Log line:
-<div class="highlight"><pre><span></span><code>CMORE field &#39;Rhino Spesies&#39; (Lookup) has no option matching &#39;Black Rhino&#39;; dropping value. Valid options: [...]
+<div class="highlight"><pre><span></span><code>CMORE field 'Rhino Spesies' (Lookup) has no option matching 'Black Rhino'; dropping value. Valid options: [...]
 </code></pre></div>
 The source value didn't resolve to a valid CMORE option. Add a <strong>value mapping</strong>
 (<code>source value → CMORE value</code>) for that field, e.g. <code>Black Rhino → Black</code>. See
@@ -572,7 +572,7 @@ the runner. The whole chain must carry it:</p>
 <li>cdip-routing preserves it (needs <code>gundi-core&gt;=1.12.0</code>).</li>
 </ul>
 <p>The runner logs the value it received:
-<div class="highlight"><pre><span></span><code>_push_event received: ... provider_metadata={&#39;source_event_url&#39;: &#39;...&#39;}
+<div class="highlight"><pre><span></span><code>_push_event received: ... provider_metadata={'source_event_url': '...'}
 </code></pre></div>
 <code>provider_metadata=None</code> there means it was dropped upstream.</p>
 <h2 id="attachments-dont-appear-in-cmore">Attachments don't appear in CMORE<a class="headerlink" href="#attachments-dont-appear-in-cmore" title="Permanent link">&para;</a></h2>
@@ -620,7 +620,7 @@ subject type via <strong>Subject type → affiliation / classification</strong>
 <code>default-source</code>. The EarthRanger runner sets the Gundi <code>source</code> to the event
 type so events group sensibly — confirm that build is deployed.</p>
 <h2 id="the-scaffold-cli-errors-with-unsupportedprotocol">The scaffold CLI errors with <code>UnsupportedProtocol</code><a class="headerlink" href="#the-scaffold-cli-errors-with-unsupportedprotocol" title="Permanent link">&para;</a></h2>
-<p><div class="highlight"><pre><span></span><code>httpx.UnsupportedProtocol: Request URL is missing an &#39;http://&#39; or &#39;https://&#39; protocol.
+<p><div class="highlight"><pre><span></span><code>httpx.UnsupportedProtocol: Request URL is missing an 'http://' or 'https://' protocol.
 </code></pre></div>
 An integration's <code>base_url</code> is stored without a scheme. Recent CLI builds prepend
 <code>https://</code> automatically; otherwise add <code>https://</code> to the ER/CMORE integration's
