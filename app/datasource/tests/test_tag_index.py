@@ -398,3 +398,36 @@ async def test_tag_index_get_index_returns_full_index():
 
     assert index.resolve("Poacher Sighting") is not None
     assert client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tag_index_fetches_for_different_keys_do_not_serialize():
+    # A single cache-wide lock held across the ~25s production get_tags fetch
+    # would make N integrations wait ~N×25s. Fetches for different keys must
+    # proceed concurrently; only same-key fetches are single-flight.
+    import asyncio
+
+    idx = TagIndex()
+    gate = asyncio.Event()
+
+    async def slow_tags():
+        await gate.wait()
+        return _sample_response()
+
+    client_a = MagicMock()
+    client_a.get_tags = AsyncMock(side_effect=slow_tags)
+    client_b = _make_client_with_get_tags(_sample_response())
+
+    task_a = asyncio.create_task(
+        idx.get(client_a, "https://a/api", "int-a", "Poacher Sighting")
+    )
+    await asyncio.sleep(0)  # let task_a enter its fetch and hold its lock
+
+    # With per-key locking, B's fetch completes while A's is still in flight.
+    tag_b = await asyncio.wait_for(
+        idx.get(client_b, "https://b/api", "int-b", "Poacher Sighting"), timeout=1.0
+    )
+    assert tag_b is not None
+
+    gate.set()
+    assert (await task_a) is not None

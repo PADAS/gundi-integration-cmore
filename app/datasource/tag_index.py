@@ -147,7 +147,12 @@ class TagIndex:
         self._ttl_seconds = ttl_seconds
         # Key: (base_url, integration_id) → (TagIndexData, fetched_at)
         self._cache: Dict[tuple, tuple] = {}
-        self._lock = asyncio.Lock()
+        # Per-key locks: fetches are single-flight per (base_url, integration)
+        # but never serialize across keys — one cache-wide lock held across a
+        # ~25s production get_tags fetch would make N integrations wait ~N×25s.
+        # setdefault is atomic enough here: asyncio is single-threaded and
+        # there is no await between the lookup and the insert.
+        self._locks: Dict[tuple, asyncio.Lock] = {}
 
     async def get(
         self,
@@ -174,7 +179,7 @@ class TagIndex:
         cached = self._get_fresh(key)
         if cached is not None:
             return cached
-        async with self._lock:
+        async with self._locks.setdefault(key, asyncio.Lock()):
             # Double-check after acquiring the lock — another coroutine may
             # have populated while we were waiting.
             cached = self._get_fresh(key)
@@ -204,6 +209,7 @@ class TagIndex:
     def _reset(self) -> None:
         """Test helper — drop the cache."""
         self._cache.clear()
+        self._locks.clear()
 
 
 # Module-level singleton used by handlers.

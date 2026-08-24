@@ -67,6 +67,22 @@ async def check_auth(client) -> Tuple[CheckResult, Optional[list]]:
                 ),
                 None,
             )
+        if status_code >= 500 or status_code in (408, 429):
+            return (
+                CheckResult(
+                    name=name,
+                    status=CheckStatus.FAIL,
+                    detail=(
+                        f"CMORE returned {status_code} for GET /v2/tags/getfull — the "
+                        "route was reached but the server failed to serve it."
+                    ),
+                    remediation=(
+                        "Likely transient server trouble (the client already retried). "
+                        "Retry later; if it persists, contact the CMORE team."
+                    ),
+                ),
+                None,
+            )
         return (
             CheckResult(
                 name=name,
@@ -77,6 +93,18 @@ async def check_auth(client) -> Tuple[CheckResult, Optional[list]]:
                     "is likely wrong (it must include the API path, e.g. "
                     "https://<instance>/za/WebAPI/api)."
                 ),
+                remediation_category=Remediation.PORTAL,
+            ),
+            None,
+        )
+    except httpx.ConnectTimeout as e:
+        return (
+            CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                detail=f"Could not connect to CMORE ({type(e).__name__}): the host never "
+                       "accepted the connection.",
+                remediation="Check the base_url host and network access (firewall/VPN/DNS).",
                 remediation_category=Remediation.PORTAL,
             ),
             None,
@@ -372,7 +400,9 @@ async def check_owner_group(client, owner_group_id: Optional[int], probe: bool) 
         ownerGroupId=owner_group_id,
     )
     try:
-        response = await client.post_event(event)
+        # Non-retried on purpose: this POST is non-idempotent, and the probe
+        # promises exactly one visible test event.
+        response = await client.post_event_once(event)
     except httpx.HTTPError as e:
         return CheckResult(
             name=name,
@@ -439,8 +469,24 @@ async def run_validation(
     checks.extend(check_tag_mappings(index, deliver_data))
 
     if (deliver_data or {}).get("subject_type_to_classification"):
-        tree = await client.get_classification_tree()
-        checks.extend(check_classifications(tree, deliver_data))
+        try:
+            tree = await client.get_classification_tree()
+        except httpx.HTTPError as e:
+            # Preserve the report contract: an endpoint failure is a FAIL
+            # result on this check, never a traceback that aborts the run.
+            checks.append(
+                CheckResult(
+                    name="classifications",
+                    status=CheckStatus.FAIL,
+                    detail=(
+                        "Could not fetch the classification tree: "
+                        f"{type(e).__name__}: {e}"
+                    ),
+                    remediation="Retry later; if it persists, contact the CMORE team.",
+                )
+            )
+        else:
+            checks.extend(check_classifications(tree, deliver_data))
     else:
         checks.extend(check_classifications([], deliver_data))
 

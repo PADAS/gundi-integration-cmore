@@ -77,3 +77,22 @@ async def test_get_tags_timeout_respects_larger_client_timeout():
     _, kwargs = client._client.get.await_args
     assert kwargs["timeout"] == 300.0
     await client._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_post_event_once_does_not_retry():
+    # The validate CLI's --probe-event promises exactly one visible test
+    # event; a retried non-idempotent POST could create up to five.
+    from app.datasource.schemas import CmoreEvent
+
+    client = CmoreClient(base_url="https://cmore.test", token="abc")
+    request = httpx.Request("POST", "https://cmore.test/v2/messages/events")
+    client._client.post = AsyncMock(
+        return_value=httpx.Response(500, request=request)
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.post_event_once(CmoreEvent(description="probe"))
+
+    assert client._client.post.await_count == 1
+    await client._client.aclose()

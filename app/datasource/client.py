@@ -113,12 +113,22 @@ class CmoreClient:
         response.raise_for_status()
         return _safe_json(response, {})
 
-    @retry_transient
-    async def post_event(self, event: CmoreEvent) -> dict:
+    async def post_event_once(self, event: CmoreEvent) -> dict:
+        """Single, non-retried event POST.
+
+        For callers that must not duplicate this non-idempotent write —
+        e.g. the validate CLI's --probe-event, which promises exactly one
+        visible test event. A lost response on the retried path could
+        create up to five.
+        """
         payload = json.loads(event.json(exclude_none=True))
         response = await self._client.post("/v2/messages/events", json=payload)
         response.raise_for_status()
         return _safe_json(response, {})
+
+    @retry_transient
+    async def post_event(self, event: CmoreEvent) -> dict:
+        return await self.post_event_once(event)
 
     @retry_transient
     async def post_comment(self, comment: CmoreComment) -> dict:

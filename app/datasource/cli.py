@@ -735,8 +735,9 @@ def validate(ctx, integration_id, connection, gundi_username, gundi_password,
                     _validation_inputs_from_integration(integration)
                 )
                 group_id = group_id if group_id is not None else cfg_group_id
-                click.echo(f"Validating integration {getattr(integration, 'name', integration_id)!r} "
-                           f"({base_url})\n")
+                if not as_json:  # keep --json output a pure JSON document
+                    click.echo(f"Validating integration {getattr(integration, 'name', integration_id)!r} "
+                               f"({base_url})\n")
             if not token:
                 raise click.UsageError(
                     "No CMORE token: pass --token / CMORE_TOKEN, or --integration/--connection."

@@ -306,11 +306,12 @@ async def test_check_owner_group_skips_when_no_owner_group_configured():
 @pytest.mark.asyncio
 async def test_check_owner_group_probe_posts_labeled_test_event():
     client = AsyncMock()
-    client.post_event.return_value = {"messageId": 352906}
+    client.post_event_once.return_value = {"messageId": 352906}
     result = await check_owner_group(client, owner_group_id=7932, probe=True)
     assert result.status == CheckStatus.PASS
     assert "352906" in result.detail
-    (event,), _ = client.post_event.await_args
+    client.post_event.assert_not_awaited()  # probe must not use the retried write
+    (event,), _ = client.post_event_once.await_args
     assert event.ownerGroupId == 7932
     assert "please ignore" in event.description.lower()
 
@@ -318,7 +319,7 @@ async def test_check_owner_group_probe_posts_labeled_test_event():
 @pytest.mark.asyncio
 async def test_check_owner_group_probe_failure_points_at_target_group():
     client = AsyncMock()
-    client.post_event.side_effect = _http_error(403)
+    client.post_event_once.side_effect = _http_error(403)
     result = await check_owner_group(client, owner_group_id=7932, probe=True)
     assert result.status == CheckStatus.FAIL
     assert "target group" in result.remediation.lower()
@@ -558,3 +559,84 @@ def test_validate_default_timeout_is_generous(fake_client, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert created["timeout"] >= 120.0
+
+
+# --- PR #32 review fixes ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_auth_connect_timeout_points_at_network_not_slow_server():
+    # ConnectTimeout subclasses TimeoutException but means the host never
+    # accepted the connection — it must not get the "server is slow" message.
+    client = AsyncMock()
+    client.get_tags.side_effect = httpx.ConnectTimeout("connect timed out")
+
+    result, raw_tags = await check_auth(client)
+
+    assert result.status == CheckStatus.FAIL
+    assert raw_tags is None
+    assert "not an authentication failure" not in result.detail.lower()
+    assert "base_url" in result.remediation or "network" in result.remediation.lower()
+
+
+@pytest.mark.asyncio
+async def test_check_auth_server_error_is_not_blamed_on_base_url():
+    # A 502 proves the route was reached; sending operators to edit a correct
+    # base_url is the wrong remediation for a transient server failure.
+    client = AsyncMock()
+    client.get_tags.side_effect = _http_error(502)
+
+    result, _ = await check_auth(client)
+
+    assert result.status == CheckStatus.FAIL
+    assert "base_url" not in (result.remediation or "")
+    assert "retry" in result.remediation.lower() or "server" in result.remediation.lower()
+
+
+@pytest.mark.asyncio
+async def test_run_validation_reports_classification_fetch_failure_and_continues():
+    # An HTTP failure fetching the classification tree must become a FAIL
+    # check result, not a traceback — and the remaining checks still run.
+    client = _full_client()
+    client.get_classification_tree.side_effect = _http_error(500)
+    deliver = {
+        "subject_type_to_classification": [
+            {"subject_type": "rhino", "battleDimension": "LAND"}
+        ]
+    }
+
+    report = await run_validation(
+        client, owner_group_id=None, deliver_data=deliver, probe_event=False
+    )
+
+    by_name = {c.name: c.status for c in report.checks}
+    assert by_name["classifications"] == CheckStatus.FAIL
+    assert "gnode_ownership" in by_name  # downstream checks still ran
+    assert by_name["gnode_ownership"] == CheckStatus.PASS
+
+
+def test_validate_json_output_is_parseable_in_integration_mode(fake_client, monkeypatch):
+    # The "Validating integration ..." banner must not precede the JSON
+    # document — that makes --json unparseable in integration/connection mode.
+    import gundi_client_v2
+
+    class FakeGundi:
+        def __init__(self, username=None, password=None):
+            pass
+
+        async def get_integration_details(self, integration_id):
+            return _fake_cmore_integration()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(gundi_client_v2, "GundiClient", FakeGundi)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["validate", "--integration", "some-id", "--gundi-username", "u",
+         "--gundi-password", "p", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert any(c["name"] == "auth" for c in payload["checks"])
