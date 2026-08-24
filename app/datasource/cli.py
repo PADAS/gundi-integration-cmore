@@ -666,5 +666,108 @@ def scaffold_mapping(ctx, gundi_username, gundi_password, connection, event_type
     run(_run())
 
 
+def _validation_inputs_from_integration(integration):
+    """Extract (base_url, token, owner_group_id, deliver_data) from a Gundi
+    integration's auth + deliver action configs."""
+    auth = _extract_auth_data(integration)
+    base_url = _ensure_scheme(auth.get("base_url") or getattr(integration, "base_url", None))
+    token = auth.get("token")
+    owner_group_id = auth.get("owner_group_id")
+    _, deliver_data = _find_action_config(integration, ("push_events", "deliver", "push"))
+    return base_url, token, owner_group_id, deliver_data
+
+
+_STATUS_ICONS = {"PASS": "✓", "FAIL": "✗", "WARN": "!", "SKIP": "-"}
+
+
+@cli.command("validate")
+@click.option("--integration", "integration_id", default=None,
+              help="Gundi integration id of the CMORE integration to validate.")
+@click.option("--connection", default=None,
+              help="Gundi connection id; validates its CMORE destination.")
+@click.option("--gundi-username", envvar="GUNDI_USERNAME", help="Gundi username (for --integration/--connection).")
+@click.option("--gundi-password", envvar="GUNDI_PASSWORD", help="Gundi password (prompted if omitted).")
+@click.option("--owner-group-id", type=int, default=None,
+              help="ShareGroupId to verify (raw mode; Gundi modes read it from the auth config).")
+@click.option("--probe-event", is_flag=True,
+              help="Post one clearly-labeled test event to verify the token can "
+                   "post to the owner group. This is a visible write in CMORE.")
+@click.option("--timeout", type=float, default=120.0, show_default=True,
+              help="Per-request timeout in seconds. Production tag catalogs can "
+                   "take 30s+ to serve, so this is much higher than the runner's "
+                   "delivery-path default.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON.")
+@click.pass_context
+def validate(ctx, integration_id, connection, gundi_username, gundi_password,
+             owner_group_id, probe_event, timeout, as_json):
+    """Validate a CMORE configuration: token, base_url, tag/field/value refs,
+    classification values, GNode ownership, and (with --probe-event) the
+    owner_group_id ↔ token linkage.
+
+    Config sources: --integration or --connection fetch the config from Gundi;
+    with neither, --token/--base-url (or CMORE_TOKEN/CMORE_BASE_URL) plus
+    --owner-group-id validate a raw candidate credential.
+
+    Exits 1 if any check fails.
+    """
+    from .validation import run_validation
+
+    if integration_id and connection:
+        raise click.UsageError("Pass either --integration or --connection, not both.")
+
+    async def _run():
+        base_url, token = ctx.obj["base_url"], ctx.obj["token"]
+        deliver_data = None
+        group_id = owner_group_id
+        gundi = None
+        try:
+            if integration_id or connection:
+                from gundi_client_v2 import GundiClient
+
+                password = gundi_password or click.prompt("Gundi password", hide_input=True)
+                gundi = GundiClient(username=gundi_username, password=password)
+                if connection:
+                    conn = await gundi.get_connection_details(connection)
+                    integration = await gundi.get_integration_details(conn.destinations[0].id)
+                else:
+                    integration = await gundi.get_integration_details(integration_id)
+                base_url, token, cfg_group_id, deliver_data = (
+                    _validation_inputs_from_integration(integration)
+                )
+                group_id = group_id if group_id is not None else cfg_group_id
+                click.echo(f"Validating integration {getattr(integration, 'name', integration_id)!r} "
+                           f"({base_url})\n")
+            if not token:
+                raise click.UsageError(
+                    "No CMORE token: pass --token / CMORE_TOKEN, or --integration/--connection."
+                )
+            async with CmoreClient(base_url=base_url, token=token, timeout=timeout) as client:
+                report = await run_validation(
+                    client,
+                    owner_group_id=group_id,
+                    deliver_data=deliver_data,
+                    probe_event=probe_event,
+                )
+        finally:
+            if gundi is not None:
+                await gundi.close()
+
+        if as_json:
+            click.echo(report.json(indent=2))
+        else:
+            for check in report.checks:
+                icon = _STATUS_ICONS.get(check.status.value, "?")
+                click.echo(f"{icon} {check.status.value:<4}  {check.name:<28}  {check.detail}")
+                if check.remediation:
+                    category = f" [{check.remediation_category.value}]" if check.remediation_category else ""
+                    click.echo(f"          ↳ {check.remediation}{category}")
+            failed = sum(1 for c in report.checks if c.status.value == "FAIL")
+            click.echo(f"\n{len(report.checks)} checks: {failed} failed.")
+        if report.has_failures:
+            ctx.exit(1)
+
+    run(_run())
+
+
 if __name__ == "__main__":
     cli()
