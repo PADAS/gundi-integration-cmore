@@ -21,8 +21,29 @@ from the portal — run it to verify the token works before any data flows
 | Field | Required | Description |
 |---|---|---|
 | **API Token** | yes | CMORE API token (raw value, *without* the `Token ` prefix — the client adds it). Stored as a secret. |
-| **API Base URL** | yes | CMORE API base for **your** instance: the instance's server + `/za/WebAPI/api` (e.g. `https://cmore.csir.co.za/za/WebAPI/api` on DFFE). URLs differ per CMORE deployment; note the value includes the API path, not just the host. |
+| **API Base URL** | yes | The **full** CMORE API base for your instance, including the path (e.g. `https://cmore.csir.co.za/za/WebAPI/api` on DFFE) — see [why the full URL](#why-the-base-url-includes-a-path). |
 | **Owner Group ID** | yes | The CMORE **ShareGroupId** linked to this token. All events are posted to this group; it controls which CMORE users/teams can see the data. |
+
+### Why the base URL includes a path
+
+The domain alone isn't enough — CMORE deployments mount the application under
+a **per-instance virtual directory**, so the URL structure is
+`https://<host>/<instance>/WebAPI/api` and the `<instance>` segment varies:
+
+| Deployment | Base URL |
+|---|---|
+| DFFE production | `https://cmore.csir.co.za/za/WebAPI/api` |
+| CHPC test server | `https://cmorewc1.chpc.ac.za/za/WebAPI/api` |
+| CSIR dev | `https://dmore.csir.co.za/dev/WebAPI/api` |
+
+The CMORE API reference documents a "Base URL" only for the test server it was
+written against, not a universal rule; its auth examples set session cookies
+scoped to `path=/dev/`, and the Portal User Guide shows the portal mounted
+under the same instance segment (`…/za/portal/login.html`). The trailing
+`WebAPI/api` part is consistent across every documented deployment (casing
+varies, which IIS treats as equivalent), but since nothing guarantees the
+instance segment — or even that suffix — the integration asks for the full
+URL rather than deriving it from a domain.
 
 > The token's ShareGroup must have **tag visibility** for any tags you map (a
 > CMORE admin subscribes the group to a tag domain). If the group sees zero
