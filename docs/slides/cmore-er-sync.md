@@ -66,15 +66,21 @@ A ranger's Rhino Carcass report — tag fields filled, linked back to EarthRange
 
 ---
 
-## Before you start: what to ask the CMORE team
+## Before you start: CMORE-side prerequisites
 
-> **Not self-service — request from your CMORE (CSIR) administrator:**
-> 1. An **organisation (share group)** on the CMORE instance, with your user in it
-> 2. **Tag domain access** — e.g. the *Wildlife* domain (Rhino Carcass + 16 more).
->    Domains you don't have simply don't appear. Some are restricted IP,
->    granted case-by-case. Say **which tags** and **which share group**.
+> **Your reserve's CMORE Organisation Admin does these first:**
+> 1. Creates a **dedicated CMORE account** for the integration (e.g.
+>    `lapalala.earthranger`) — not an individual staff member's login
+> 2. Assigns the **Integration permission** to that account
+>
+> **Then request from the CMORE team (CSIR) — not self-service:**
+>
+> 3. An **organisation (share group)** on the instance, with that account in it
+> 4. **Tag domain access** — e.g. *Wildlife* (Rhino Carcass + 16 more). Some
+>    domains are restricted IP, granted case-by-case. Say **which tags** and
+>    **which share group**.
 
-Everything else in this deck you can do yourself.
+Use the dedicated account for the rest of Part 1. Everything else you can do yourself.
 
 ---
 
