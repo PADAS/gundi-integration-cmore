@@ -4,14 +4,17 @@
 aiohttp
 environs~=9.5.0
 pydantic~=1.10.15
-fastapi~=0.103.2
+fastapi~=0.115.0
 uvicorn~=0.23.2
 gundi-core~=1.12.0
 gundi-client-v2~=3.3.0
 # httpx is imported directly by app/services/* so it must be declared here
 # (template parity). Unlike the template's ~=0.24.1 pin (tied to
-# gundi-client-v2 2.4.0), this repo runs gundi-client-v2 3.3.0 on httpx 0.28
-# and the TestClient-based suite is green there.
+# gundi-client-v2 2.4.0), this repo runs gundi-client-v2 3.3.0 on httpx 0.28.
+# That is also why fastapi is ~=0.115 above rather than the template's
+# ~=0.103: starlette 0.27's TestClient passes app= to httpx.Client, which
+# httpx 0.28 removed, so the template's TestClient-based tests only collect
+# on a newer starlette.
 httpx~=0.28.1
 stamina~=23.2.0
 redis~=5.0.1
