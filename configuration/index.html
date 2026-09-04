@@ -368,6 +368,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Authenticate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-the-base-url-includes-a-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the base URL includes a path
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -586,7 +603,7 @@ from the portal — run it to verify the token works before any data flows
 <tr>
 <td><strong>API Base URL</strong></td>
 <td>yes</td>
-<td>CMORE API base for <strong>your</strong> instance: the instance's server + <code>/za/WebAPI/api</code> (e.g. <code>https://cmore.csir.co.za/za/WebAPI/api</code> on DFFE). URLs differ per CMORE deployment; note the value includes the API path, not just the host.</td>
+<td>The <strong>full</strong> CMORE API base for your instance, including the path (e.g. <code>https://cmore.csir.co.za/za/WebAPI/api</code> on DFFE) — see <a href="#why-the-base-url-includes-a-path">why the full URL</a>.</td>
 </tr>
 <tr>
 <td><strong>Owner Group ID</strong></td>
@@ -595,6 +612,40 @@ from the portal — run it to verify the token works before any data flows
 </tr>
 </tbody>
 </table>
+<h3 id="why-the-base-url-includes-a-path">Why the base URL includes a path<a class="headerlink" href="#why-the-base-url-includes-a-path" title="Permanent link">&para;</a></h3>
+<p>The domain alone isn't enough — CMORE deployments mount the application under
+a <strong>per-instance virtual directory</strong>, so the URL structure is
+<code>https://&lt;host&gt;/&lt;instance&gt;/WebAPI/api</code> and the <code>&lt;instance&gt;</code> segment varies:</p>
+<table>
+<thead>
+<tr>
+<th>Deployment</th>
+<th>Base URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DFFE production</td>
+<td><code>https://cmore.csir.co.za/za/WebAPI/api</code></td>
+</tr>
+<tr>
+<td>CHPC test server</td>
+<td><code>https://cmorewc1.chpc.ac.za/za/WebAPI/api</code></td>
+</tr>
+<tr>
+<td>CSIR dev</td>
+<td><code>https://dmore.csir.co.za/dev/WebAPI/api</code></td>
+</tr>
+</tbody>
+</table>
+<p>The CMORE API reference documents a "Base URL" only for the test server it was
+written against, not a universal rule; its auth examples set session cookies
+scoped to <code>path=/dev/</code>, and the Portal User Guide shows the portal mounted
+under the same instance segment (<code>…/za/portal/login.html</code>). The trailing
+<code>WebAPI/api</code> part is consistent across every documented deployment (casing
+varies, which IIS treats as equivalent), but since nothing guarantees the
+instance segment — or even that suffix — the integration asks for the full
+URL rather than deriving it from a domain.</p>
 <blockquote>
 <p>The token's ShareGroup must have <strong>tag visibility</strong> for any tags you map (a
 CMORE admin subscribes the group to a tag domain). If the group sees zero
