@@ -631,7 +631,7 @@ need to write code or call APIs.</p>
 </tr>
 <tr>
 <td>CMORE</td>
-<td>A user in your organisation's share group, with the <strong>Integration permission</strong></td>
+<td>A <strong>dedicated integration account</strong> (not a staff member's login) in your organisation's share group, with the <strong>Integration permission</strong> — see the box below</td>
 <td><code>cmorewc1.chpc.ac.za</code></td>
 </tr>
 </tbody>
@@ -644,15 +644,32 @@ URL wherever one appears. For example, on the DFFE environment the portal is
 <code>https://cmore.csir.co.za</code> and the API base is
 <code>https://cmore.csir.co.za/za/WebAPI/api</code>. If you don't know your instance's
 URL, ask your CMORE administrator.</p>
+<p><strong>Set up by your organisation's CMORE Organisation Admin — do this first:</strong></p>
+<ol>
+<li><strong>Create a dedicated CMORE user account for the integration.</strong> Each
+   reserve using the integration needs its own CMORE account that exists
+   only for EarthRanger — separate from the accounts individual staff use.
+   This is the account that owns the integration configuration (the
+   service, its API token, and the share group and data-access settings),
+   so it must not be tied to a person who might leave or change roles. Your
+   organisation chooses the naming convention; for example, Lapalala Game
+   Reserve might create <code>lapalala.earthranger</code>.</li>
+<li><strong>Assign the Integration permission to that account.</strong> Creating and
+   managing an external service (Part 1.2) requires it. The check is
+   self-evidencing: sign in as the dedicated account, open the Admin Site,
+   and if the <strong>Service</strong> menu is shown and you can create a service and
+   view its API key, the permission is in place. If the <strong>Service</strong> menu is
+   missing, the permission hasn't been assigned yet.</li>
+</ol>
+<p>The reserve's Organisation Admin is responsible for both steps — the CMORE
+team (CSIR) does not create the account or assign the permission, but can
+help if the Organisation Admin runs into trouble with either. Once both are
+done, use the dedicated account for everything in Part 1.</p>
 <p><strong>Ask your CMORE administrator (CSIR) for these — they are not self-service:</strong></p>
 <ol>
-<li><strong>An organisation (share group) on the CMORE instance</strong>, with your CMORE
-   user in it. Organisations and share groups are created by the CMORE team.</li>
-<li><strong>The Integration permission on your CMORE account.</strong> Creating and
-   managing an external service (Part 1.2) requires it. The check is
-   self-evidencing: if the Admin Site shows the <strong>Service</strong> menu and you can
-   create a service and view its API key, you have the permission. If the
-   <strong>Service</strong> menu is missing, you don't — contact the CMORE team.</li>
+<li><strong>An organisation (share group) on the CMORE instance</strong>, with the
+   dedicated integration account in it. Organisations and share groups are
+   created by the CMORE team.</li>
 <li><strong>Access to the tag domain you need.</strong> Tags live in <em>tag domains</em> (for
    example, the <strong>Wildlife</strong> domain contains Rhino Carcass, Poacher
    Sighting, Wounded Rhino and 14 more). Your share group can only use tags
@@ -662,10 +679,10 @@ URL, ask your CMORE administrator.</p>
    granted case-by-case. Tell the CMORE team <strong>which tags you want to use
    and which share group needs them</strong>.</li>
 </ol>
-<p>These three grants are independent — having one doesn't imply the others.
-In particular, successfully creating a service and API key (item 2) does
-<strong>not</strong> mean your share group or tag domains are set up; those can still
-fail later, at delivery time.</p>
+<p>These grants are independent — having one doesn't imply the others. In
+particular, successfully creating a service and API key (Integration
+permission) does <strong>not</strong> mean your share group or tag domains are set up;
+those can still fail later, at delivery time.</p>
 <p>Everything else in this guide — creating the service, getting the API key,
 finding your share group ID, mapping fields — you can do yourself.</p>
 </blockquote>
@@ -681,7 +698,8 @@ paste these three things into Gundi in Part 2.</p>
 </ul>
 <h3 id="11-open-the-cmore-admin-site">1.1 Open the Cmore Admin Site<a class="headerlink" href="#11-open-the-cmore-admin-site" title="Permanent link">&para;</a></h3>
 <ol>
-<li>Sign in to the CMORE Web Portal.</li>
+<li>Sign in to the CMORE Web Portal <strong>as the dedicated integration account</strong>
+   (see Prerequisites), not with your personal login.</li>
 </ol>
 <p><img alt="CMORE sign-in page" src="../images/cmore-01-login.png" /></p>
 <ol>
@@ -696,9 +714,11 @@ paste these three things into Gundi in Part 2.</p>
    list — every integration identity your organisation has.</li>
 </ol>
 <blockquote>
-<p>Don't see <strong>Service</strong> in the menu? Your CMORE account lacks the
-<strong>Integration permission</strong> — ask the CMORE team to grant it (see
-Prerequisites).</p>
+<p>Don't see <strong>Service</strong> in the menu? The account you're signed in as lacks
+the <strong>Integration permission</strong> — ask your organisation's CMORE
+Organisation Admin to assign it to the dedicated integration account (see
+Prerequisites). Also double-check you're signed in as that account and
+not your personal one.</p>
 </blockquote>
 <p><img alt="External Services list" src="../images/cmore-08-external-services.png" /></p>
 <ol>
