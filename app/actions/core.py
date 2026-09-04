@@ -1,7 +1,7 @@
 import importlib
 import inspect
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 from app.services.utils import UISchemaModelMixin
@@ -66,23 +66,10 @@ class ReferenceActionConfiguration(ActionConfiguration):
 
     Reference actions are stateless — they read the integration's auth config
     but store no configuration of their own; callers (the Gundi portal)
-    supply query params via config_overrides. They return a
-    ReferenceDataResponse dict. See
-    docs/superpowers/specs/2026-07-31-reference-data-config-ui-design.md.
+    supply query params via config_overrides. The runner therefore executes
+    them without a stored config row, and they are one of the two action
+    types (with auth) allowed to run ephemerally against a draft integration.
     """
-
-
-class ReferenceOption(BaseModel):
-    value: str
-    label: Optional[str] = None        # portal defaults label to value
-    description: Optional[str] = None  # tooltip / help text
-    group: Optional[str] = None        # optional grouping for long lists
-
-
-class ReferenceDataResponse(BaseModel):
-    options: List[ReferenceOption]
-    cache_ttl_seconds: int = 300       # portal-side cache hint
-    truncated: bool = False            # true if the list was capped
 
 
 def discover_actions(module_name, prefix):

@@ -32,7 +32,7 @@ from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
 from app.services.state import IntegrationStateManager
 from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
-from .core import ReferenceDataResponse, ReferenceOption
+from .reference_data import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
 

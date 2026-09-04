@@ -6,12 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 
 def test_reference_contract_types():
-    from app.actions.core import (
-        ActionConfiguration,
-        ReferenceActionConfiguration,
-        ReferenceDataResponse,
-        ReferenceOption,
-    )
+    from app.actions.core import ActionConfiguration, ReferenceActionConfiguration
+    from app.actions.reference_data import ReferenceDataResponse, ReferenceOption
 
     assert issubclass(ReferenceActionConfiguration, ActionConfiguration)
 
