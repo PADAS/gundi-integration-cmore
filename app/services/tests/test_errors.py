@@ -10,8 +10,11 @@ from app.services.errors import (
     IntegrationConnectionError,
     IntegrationRateLimitError,
     IntegrationBadResponseError,
+    IntegrationConfigurationError,
     classify_error,
+    format_classified_error,
     format_error_message,
+    source_status_code,
 )
 
 
@@ -22,6 +25,7 @@ from app.services.errors import (
         (IntegrationConnectionError, "connectivity", "Could not reach the provider"),
         (IntegrationRateLimitError, "rate_limit", "Rate limited by the provider"),
         (IntegrationBadResponseError, "bad_response", "Unexpected response from the provider"),
+        (IntegrationConfigurationError, "configuration", "Invalid configuration"),
     ],
 )
 def test_integration_error_subclasses_define_category(exception_class, expected_type, expected_title):
@@ -162,6 +166,20 @@ def test_format_omits_http_suffix_without_status_code():
     assert format_error_message(exc) == "Could not reach the provider — DNS lookup failed"
 
 
+def test_format_can_omit_the_message_segment():
+    # The ephemeral path renders the same ClassifiedError without the message,
+    # which may carry str(exc) from the source. One renderer, one switch.
+    exc = IntegrationAuthError("TrackIt rejected the credentials", status_code=401)
+
+    assert format_classified_error(classify_error(exc), include_message=False) == "Authentication failed (HTTP 401)"
+
+
+def test_format_without_message_keeps_the_title_when_there_is_no_status():
+    exc = IntegrationConnectionError("DNS lookup failed")
+
+    assert format_classified_error(classify_error(exc), include_message=False) == "Could not reach the provider"
+
+
 def test_classify_builtin_timeout_as_connectivity():
     # On Python 3.10, builtin TimeoutError (== socket.timeout) is distinct
     # from asyncio.TimeoutError; both must classify as connectivity.
@@ -171,3 +189,52 @@ def test_classify_builtin_timeout_as_connectivity():
         classified = classify_error(exc)
         assert classified is not None
         assert classified.error_type == "connectivity"
+
+
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        (_http_status_error(404), 404),
+        (IntegrationAuthError("nope", status_code=401), 401),
+        (IntegrationAuthError("nope"), None),
+        (ValueError("no response here"), None),
+    ],
+)
+def test_source_status_code_reads_every_carrier(exc, expected):
+    assert source_status_code(exc) == expected
+
+
+@pytest.mark.parametrize("junk", ["401", True, 4.01, None])
+def test_source_status_code_ignores_non_int_status(junk):
+    # Connector hierarchies pre-set status_code freely; anything that is not
+    # an int reads as unknown instead of raising later on a comparison.
+    exc = IntegrationBadResponseError("odd")
+    exc.status_code = junk
+
+    assert source_status_code(exc) is None
+    assert classify_error(exc).status_code is None
+
+
+@pytest.mark.parametrize(
+    "status, expected_type",
+    [(401, "auth"), (403, "auth"), (429, "rate_limit"), (503, "bad_response")],
+)
+def test_classify_error_reads_aiohttp_response_status(status, expected_type):
+    # aiohttp carries the status on .status, not .response.status_code, and has
+    # no .response at all; the classifier must give its 401/403/429/5xx the
+    # same verdict httpx gets, or every aiohttp connector's HTTP failures go
+    # unclassified.
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    request_info = aiohttp.RequestInfo(
+        url=URL("https://source.example/me"), method="GET",
+        headers=CIMultiDictProxy(CIMultiDict()), real_url=URL("https://source.example/me"),
+    )
+    exc = aiohttp.ClientResponseError(request_info, (), status=status, message="boom")
+
+    classified = classify_error(exc)
+
+    assert classified is not None
+    assert classified.error_type == expected_type
+    assert classified.status_code == status

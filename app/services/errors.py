@@ -64,9 +64,18 @@ class IntegrationBadResponseError(IntegrationError):
     default_title = "Unexpected response from the provider"
 
 
-class IntegrationDependencyNotReadyError(IntegrationError):
-    error_type = "dependency_not_ready"
-    default_title = "Waiting for a related object to be delivered"
+class IntegrationConfigurationError(IntegrationError):
+    """A problem the connector found with the integration's own configuration
+    or a query parameter (an empty site URL, an unknown event type), rather
+    than a verdict from the provider.
+
+    Connector-authored, but by contract the message describes the shape of
+    the problem without echoing the submitted values, so the ephemeral path
+    forwards it (as a 422) where it redacts every other connector message
+    (see action_runner._ephemeral_error_text).
+    """
+    error_type = "configuration"
+    default_title = "Invalid configuration"
 
 
 class ClassifiedError(NamedTuple):
@@ -86,6 +95,33 @@ CONNECTIVITY_EXCEPTIONS = (
 )
 
 
+def source_status_code(exc: Exception) -> Optional[int]:
+    """The HTTP status the third party answered with, if the exception carries one.
+
+    Three shapes carry it: `IntegrationError.status_code`, aiohttp's
+    `ClientResponseError.status`, and the duck-typed `.response.status_code`
+    (httpx.HTTPStatusError, requests.HTTPError, and anything else that keeps
+    the response on the exception). This is the single reader shared by the
+    classifier and the ephemeral status forwarding, so the text and the HTTP
+    status the runner returns can never disagree about which status they saw.
+
+    Connectors are free to pre-set `status_code` on their own exception
+    hierarchies, so it is not trusted to be an int: anything else (a "401"
+    string, a bool) reads as unknown rather than raising inside an except
+    block, which would replace the redacted error with the raw one.
+    """
+    if isinstance(exc, IntegrationError):
+        code = getattr(exc, "status_code", None)
+    elif isinstance(exc, aiohttp.ClientResponseError):
+        code = exc.status
+    else:
+        # getattr chain: non-HTTP exceptions have no .response attribute.
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
+
+
 def classify_error(exc: Exception) -> Optional[ClassifiedError]:
     """Classify a third-party failure for consistent activity-log reporting.
 
@@ -94,16 +130,15 @@ def classify_error(exc: Exception) -> Optional[ClassifiedError]:
     (`exc.response.status_code`, exception type). Returns None when the error
     can't be classified — callers keep the generic format.
     """
+    status_code = source_status_code(exc)
     if isinstance(exc, IntegrationError):
         return ClassifiedError(
             error_type=exc.error_type,
             title=exc.default_title,
             message=getattr(exc, "message", None) or "",
-            status_code=getattr(exc, "status_code", None),
+            status_code=status_code,
         )
 
-    # getattr chain: non-HTTP exceptions have no .response attribute.
-    status_code = getattr(getattr(exc, "response", None), "status_code", None)
     # httpx.HTTPStatusError from raise_for_status() stringifies to multi-line
     # text (URL plus a "For more information check: ..." line) — only the
     # first line is useful as a short, human-first message.
@@ -119,15 +154,17 @@ def classify_error(exc: Exception) -> Optional[ClassifiedError]:
     return None
 
 
-def format_classified_error(classified: ClassifiedError) -> str:
+def format_classified_error(classified: ClassifiedError, *, include_message: bool = True) -> str:
     """Build the clean text: "<title> — <message> (HTTP <status>)".
 
     The portal prepends "Error running action '<id>': " to this string, so it
     must be short and lead with what an operator needs to see. The message
-    segment is skipped when redundant; the HTTP suffix when unknown.
+    segment is skipped when redundant, or when the caller passes
+    include_message=False (the ephemeral path, where the message may carry
+    str(exc) from the source); the HTTP suffix when unknown.
     """
     text = classified.title
-    if classified.message and classified.message != classified.title:
+    if include_message and classified.message and classified.message != classified.title:
         text = f"{text} — {classified.message}"
     if classified.status_code:
         text = f"{text} (HTTP {classified.status_code})"

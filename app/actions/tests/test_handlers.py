@@ -869,7 +869,7 @@ async def test_deliver_attachment_raises_when_parent_event_not_delivered(
     # may simply not have been processed yet (ordering isn't guaranteed).
     # Classified as dependency_not_ready so the activity log shows a labeled
     # retryable wait rather than an unclassified failure.
-    from app.services.errors import IntegrationDependencyNotReadyError
+    from app.actions.errors import IntegrationDependencyNotReadyError
 
     with pytest.raises(IntegrationDependencyNotReadyError, match="not delivered yet"):
         await action_deliver(integration, deliver_config, delivery, metadata)
