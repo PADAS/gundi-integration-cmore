@@ -15,9 +15,11 @@ pydantic~=1.10.15
 # forked: template pins ~=0.103.2; see the httpx note below
 fastapi~=0.115.0
 uvicorn~=0.23.2
-# forked: template pins gundi-core~=1.11 / gundi-client-v2~=2.4; this repo
-# needs 3.x for scaffold write-back and attachments, which pulls httpx 0.28
+# forked: template pins ~=1.11.1; 1.12 adds Event.provider_metadata, which the
+# provider deep-link in deliver reads
 gundi-core~=1.12.0
+# forked: template pins ~=2.4.0; 3.x is needed for the generic-model rollout
+# and scaffold write-back, and it requires httpx 0.28
 gundi-client-v2~=3.3.0
 # forked: httpx is imported directly by app/services/* so it must be declared
 # here (template parity). The template pins ~=0.24.1 (tied to gundi-client-v2

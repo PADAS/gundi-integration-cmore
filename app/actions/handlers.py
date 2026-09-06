@@ -105,10 +105,14 @@ async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     per (base_url, token)."""
     auth = _get_auth_config(integration)
     token = auth.token.get_secret_value()
+    scope = _reference_cache_scope(token)
+    # A hit is the common case in the dropdown cascade; do not build an httpx
+    # client (synchronous SSL setup) for a call that sends nothing.
+    cached = reference_tag_index.peek(auth.base_url, scope)
+    if cached is not None:
+        return cached
     async with CmoreClient(base_url=auth.base_url, token=token) as client:
-        return await reference_tag_index.get_index(
-            client, auth.base_url, _reference_cache_scope(token)
-        )
+        return await reference_tag_index.get_index(client, auth.base_url, scope)
 
 
 async def action_list_tag_names(

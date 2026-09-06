@@ -68,3 +68,25 @@ async def test_set_state_with_ttl_is_a_no_op_on_the_ephemeral_path(mocker, mock_
         ephemeral_run.reset(token)
 
     mock_redis.Redis.return_value.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_state_with_ttl_writes_the_key_and_value_the_template_writes(mocker, mock_redis, integration_v2, mock_integration_state):
+    """The TTL path re-implements the template's write; if the template ever
+    changes its key layout or serializer, the mapping deliver writes here must
+    still be the one get_state reads."""
+    from app.actions.state import CmoreStateManager
+    from app.services.state import IntegrationStateManager
+
+    mocker.patch("app.services.state.redis", mock_redis)
+    redis_set = mock_redis.Redis.return_value.set
+    args = dict(integration_id=str(integration_v2.id), action_id="deliver", source_id="evt-1", state=mock_integration_state)
+
+    await IntegrationStateManager().set_state(**args)
+    template_call = redis_set.call_args
+    redis_set.reset_mock()
+    await CmoreStateManager().set_state(**args, ttl_seconds=60)
+    cmore_call = redis_set.call_args
+
+    assert cmore_call.args == template_call.args
+    assert cmore_call.kwargs == {"ex": 60}

@@ -489,3 +489,38 @@ async def test_tag_index_eviction_keeps_a_lock_that_is_held(monkeypatch):
     release.set()
     await refresh
     assert slow_client.get_tags.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_tag_index_evicts_the_lock_of_a_scope_whose_fetch_failed(monkeypatch):
+    """A wrong token gets a lock on the way in and never a cache entry, so
+    the lock is the only trace of it; eviction must sweep locks as well."""
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    failing = MagicMock()
+    failing.get_tags = AsyncMock(side_effect=RuntimeError("401"))
+    with pytest.raises(RuntimeError):
+        await idx.get(failing, "https://example/api", "bad-token", "Poacher Sighting")
+    assert ("https://example/api", "bad-token") in idx._locks
+
+    await idx.get(
+        _make_client_with_get_tags(_sample_response()), "https://example/api", "scope-2", "Poacher Sighting"
+    )
+
+    assert set(idx._locks) == {("https://example/api", "scope-2")}
+
+
+def test_tag_index_peek_reports_a_fresh_entry_without_a_client(monkeypatch):
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    assert idx.peek("https://example/api", "scope-1") is None
+    idx._cache[("https://example/api", "scope-1")] = (_build_index(_sample_response()), clock["now"])
+    assert idx.peek("https://example/api", "scope-1") is not None
+    clock["now"] += 121
+    assert idx.peek("https://example/api", "scope-1") is None

@@ -201,19 +201,26 @@ class TagIndex:
             self._cache[key] = (index, _now())
             return index
 
+    def peek(self, base_url: str, scope: str) -> Optional[TagIndexData]:
+        """The cached index if it is fresh, else None. Lets a caller skip
+        opening a client on a hit; a miss still goes through get_index."""
+        return self._get_fresh((base_url, scope))
+
     def _evict_expired(self) -> None:
-        """Drop expired entries and their idle locks. A finite-TTL index sees
-        an open-ended stream of scopes (one per token on the reference path),
-        so without this the stale entries would accumulate for the life of
-        the process. A lock that is currently held belongs to an in-flight
-        refresh of that key and stays, so a concurrent caller joins that
-        fetch instead of starting a duplicate."""
+        """Drop expired entries and idle locks that no longer guard a fresh
+        entry. A finite-TTL index sees an open-ended stream of scopes (one
+        per token on the reference path), so without this the stale entries
+        would accumulate for the life of the process. Locks are swept on
+        their own, not via the cache: a scope whose fetch raised (a wrong
+        token) has a lock and never had an entry. A lock that is currently
+        held belongs to an in-flight fetch of that key and stays, so a
+        concurrent caller joins that fetch instead of starting a duplicate."""
         if self._ttl_seconds is None:
             return
         for key in [k for k in self._cache if self._get_fresh(k) is None]:
             del self._cache[key]
-            lock = self._locks.get(key)
-            if lock is not None and not lock.locked():
+        for key, lock in list(self._locks.items()):
+            if not lock.locked() and key not in self._cache:
                 del self._locks[key]
 
     def _get_fresh(self, key) -> Optional[TagIndexData]:
