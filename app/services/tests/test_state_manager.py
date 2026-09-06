@@ -292,26 +292,3 @@ async def test_state_redis_retry_backoff_does_not_block_the_event_loop(mocker, m
 
     assert state == {}
     assert calls["n"] == 2
-
-
-@pytest.mark.asyncio
-async def test_set_state_passes_ttl_to_redis(mocker, mock_redis, integration_v2, mock_integration_state):
-    """When ttl_seconds is provided, the underlying Redis SET uses an EX expiry."""
-    mocker.patch("app.services.state.redis", mock_redis)
-    state_manager = IntegrationStateManager()
-    integration_id = str(integration_v2.id)
-    source_id = "er-event-uuid"
-
-    await state_manager.set_state(
-        integration_id=integration_id,
-        action_id="deliver",
-        source_id=source_id,
-        state=mock_integration_state,
-        ttl_seconds=7_776_000,  # 90 days
-    )
-
-    mock_redis.Redis.return_value.set.assert_called_once_with(
-        f"integration_state.{integration_id}.deliver.{source_id}",
-        json.dumps(mock_integration_state, default=str),
-        ex=7_776_000,
-    )

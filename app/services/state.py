@@ -38,20 +38,15 @@ class IntegrationStateManager:
         value = json.loads(json_value) if json_value else {}
         return value
 
-    async def set_state(self, integration_id: str, action_id: str, state: dict, source_id: str = "no-source", ttl_seconds: int = None):
-        """Persist state. Pass ``ttl_seconds`` to give the key a Redis expiry
-        — useful for per-source records that would otherwise grow the keyspace
-        indefinitely. (cmore addition on top of the template.)"""
+    async def set_state(self, integration_id: str, action_id: str, state: dict, source_id: str = "no-source"):
         if _skip_on_ephemeral_run("set_state", integration_id, action_id):
             return
-        key = f"integration_state.{integration_id}.{action_id}.{source_id}"
-        value = json.dumps(state, default=str)
         async for attempt in stamina.retry_context(**REDIS_RETRY):
             with attempt:
-                if ttl_seconds is not None:
-                    await self.db_client.set(key, value, ex=ttl_seconds)
-                else:
-                    await self.db_client.set(key, value)
+                await self.db_client.set(
+                    f"integration_state.{integration_id}.{action_id}.{source_id}",
+                    json.dumps(state, default=str)
+                )
 
     async def set_if_absent(
         self, integration_id: str, action_id: str, *, ttl_seconds: int, source_id: str = "no-source"

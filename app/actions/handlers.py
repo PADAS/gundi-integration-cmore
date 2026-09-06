@@ -28,9 +28,9 @@ from app.datasource.schemas import (
 )
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
 from app.services.activity_logger import activity_logger, log_action_activity
-from app.services.errors import IntegrationDependencyNotReadyError
 from app.services.cloud_storage import download_attachment
-from app.services.state import IntegrationStateManager
+from .errors import IntegrationDependencyNotReadyError
+from .state import CmoreStateManager
 from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .reference_data import ReferenceDataResponse, ReferenceOption
 
@@ -44,7 +44,7 @@ TRACK_SOURCE = "Gundi"
 # eventually prunes itself for events that nobody touches again.
 CMORE_EVENT_MAPPING_TTL_SECONDS = 90 * 24 * 60 * 60  # 90 days
 
-state_manager = IntegrationStateManager()
+state_manager = CmoreStateManager()
 
 
 def _get_auth_config(integration: Integration) -> AuthenticateConfig:
@@ -88,14 +88,26 @@ REFERENCE_TAGS_TTL_SECONDS = 120
 reference_tag_index = TagIndex(ttl_seconds=REFERENCE_TAGS_TTL_SECONDS)
 
 
+def _reference_cache_scope(token: str) -> str:
+    """Cache scope for the reference tag index: a digest of the token.
+
+    CMORE scopes tag visibility by the token's ShareGroup, so the token is
+    what actually decides which tags a fetch returns. The integration id is
+    not usable here: the portal's draft (ephemeral) runs mint a fresh id per
+    call, so an id-keyed cache would never hit and every dropdown in the
+    tag -> fields -> options cascade would pay the full get_tags fetch. The
+    digest keeps the token itself out of cache keys and log lines."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+
 async def _fetch_tag_index(integration: Integration) -> TagIndexData:
-    """Tag index for reference actions, cached for REFERENCE_TAGS_TTL_SECONDS."""
+    """Tag index for reference actions, cached for REFERENCE_TAGS_TTL_SECONDS
+    per (base_url, token)."""
     auth = _get_auth_config(integration)
-    async with CmoreClient(
-        base_url=auth.base_url, token=auth.token.get_secret_value()
-    ) as client:
+    token = auth.token.get_secret_value()
+    async with CmoreClient(base_url=auth.base_url, token=token) as client:
         return await reference_tag_index.get_index(
-            client, auth.base_url, str(integration.id)
+            client, auth.base_url, _reference_cache_scope(token)
         )
 
 

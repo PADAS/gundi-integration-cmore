@@ -431,3 +431,61 @@ async def test_tag_index_fetches_for_different_keys_do_not_serialize():
 
     gate.set()
     assert (await task_a) is not None
+
+
+@pytest.mark.asyncio
+async def test_tag_index_with_ttl_evicts_expired_entries_and_their_locks(monkeypatch):
+    """A finite-TTL index sees an unbounded stream of keys (one per token on
+    the reference path); expired entries must not accumulate."""
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    client = _make_client_with_get_tags(_sample_response())
+
+    await idx.get(client, "https://example/api", "scope-1", "Poacher Sighting")
+    clock["now"] += 121
+    await idx.get(client, "https://example/api", "scope-2", "Poacher Sighting")
+
+    assert set(idx._cache) == {("https://example/api", "scope-2")}
+    assert set(idx._locks) == {("https://example/api", "scope-2")}
+
+
+@pytest.mark.asyncio
+async def test_tag_index_eviction_keeps_a_lock_that_is_held(monkeypatch):
+    """An in-flight refresh owns its lock; evicting the stale entry must not
+    drop that lock, or a second caller would start a duplicate fetch."""
+    import asyncio
+    import app.datasource.tag_index as tag_index_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
+    idx = TagIndex(ttl_seconds=120)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_get_tags():
+        started.set()
+        await release.wait()
+        return _sample_response()
+
+    slow_client = MagicMock()
+    slow_client.get_tags = AsyncMock(side_effect=slow_get_tags)
+    release.set()
+    await idx.get(slow_client, "https://example/api", "scope-1", "Poacher Sighting")
+    release.clear()
+    started.clear()
+    clock["now"] += 121  # scope-1 is stale; the refresh below holds its lock
+    refresh = asyncio.create_task(
+        idx.get(slow_client, "https://example/api", "scope-1", "Poacher Sighting")
+    )
+    await asyncio.wait_for(started.wait(), 1)
+
+    fast_client = _make_client_with_get_tags(_sample_response())
+    await idx.get(fast_client, "https://example/api", "scope-2", "Poacher Sighting")
+
+    assert ("https://example/api", "scope-1") in idx._locks
+    release.set()
+    await refresh
+    assert slow_client.get_tags.await_count == 2

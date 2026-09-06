@@ -78,12 +78,6 @@ class IntegrationConfigurationError(IntegrationError):
     default_title = "Invalid configuration"
 
 
-# CMORE-specific: an attachment whose parent event has not been delivered yet.
-class IntegrationDependencyNotReadyError(IntegrationError):
-    error_type = "dependency_not_ready"
-    default_title = "Waiting for a related object to be delivered"
-
-
 class ClassifiedError(NamedTuple):
     error_type: str
     title: str
