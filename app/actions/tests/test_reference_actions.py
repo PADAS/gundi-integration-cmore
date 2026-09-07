@@ -82,6 +82,7 @@ def mock_cmore_client(mocker):
     instance = MagicMock()
     instance.get_tags = AsyncMock(return_value=RAW_TAGS)
     instance.get_classification_tree = AsyncMock(return_value=[])
+    instance.get_gateway_mapping = AsyncMock(return_value=[])
     mocker.patch.object(handlers_module, "CmoreClient", _client_cls_yielding(instance))
     return instance
 
