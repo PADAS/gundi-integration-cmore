@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from contextlib import asynccontextmanager
 import logging
 import mimetypes
 import os
@@ -14,7 +15,7 @@ from gundi_core.events import GundiDelivery
 from gundi_core.schemas.v2 import Integration, LogLevel
 from gundi_client_v2.transformations import apply_transformations
 
-from app.datasource.client import CmoreClient
+from app.datasource.client import CmoreClient, cache_scope_for_token
 from app.datasource.schemas import (
     CmoreClassification,
     CmoreComment,
@@ -29,7 +30,9 @@ from app.datasource.schemas import (
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
 from app import settings
 from app.services.activity_logger import activity_logger, ephemeral_run, log_action_activity
-from app.services.errors import IntegrationConfigurationError, classify_error, format_classified_error
+from app.services.errors import (
+    IntegrationConfigurationError, classify_error, format_classified_error, source_status_code,
+)
 from app.services.url_policy import validate_outbound_url
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
@@ -73,12 +76,20 @@ async def _check_draft_api_base_url(base_url: str) -> None:
             base_url, allowlist=settings.EPHEMERAL_BASE_URL_ALLOWLIST, what="API Base URL",
         )
     except ValueError as e:
-        # The policy text names the host and the resolved address; that is a
-        # submitted value, so it goes to the log and a fixed message to the user.
-        logger.warning("Draft API Base URL refused by the outbound URL policy: %s", e)
-        raise IntegrationConfigurationError(
-            "API Base URL is not allowed by this deployment's outbound URL policy."
-        ) from None
+        # Runner-authored text, forwarded as the template's own guard forwards
+        # it: it names the scheme, the host and the resolved address, never
+        # the URL's userinfo, path or query, and it tells the user what to
+        # change ("only 'https' is permitted", "resolves to a private ...").
+        raise IntegrationConfigurationError(str(e)) from None
+
+
+@asynccontextmanager
+async def _cmore_client(base_url: str, token: str):
+    """The one way handlers open a CMORE client, so the draft URL policy
+    cannot be bypassed by a new call site. A no-op check off the draft path."""
+    await _check_draft_api_base_url(base_url)
+    async with CmoreClient(base_url=base_url, token=token) as client:
+        yield client
 
 
 def _track_no_for(subject_key: str) -> int:
@@ -93,15 +104,18 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     token = action_config.token.get_secret_value()
     if not token or not action_config.base_url:
         return {"valid_credentials": False, "error": "base_url and token are required."}
-    await _check_draft_api_base_url(action_config.base_url)
     try:
-        async with CmoreClient(base_url=action_config.base_url, token=token) as client:
+        async with _cmore_client(action_config.base_url, token) as client:
             # gateway_mapping is a tiny authenticated read (401 on a bad token)
             # that also proves the token belongs to a service. get_tags would
             # prove tag visibility too, but takes ~25s on production catalogs
             # (DFFE) — past the portal's patience for "test credentials". Tag
             # visibility is covered by the validate CLI and reference actions.
             await client.get_gateway_mapping()
+    except IntegrationConfigurationError:
+        # The draft URL policy refusing the API Base URL: a 422 with the
+        # policy's text, as for the reference actions, not a failed login.
+        raise
     except Exception as e:
         return {"valid_credentials": False, "error": _auth_error_text(e)}
     return {"valid_credentials": True}
@@ -116,7 +130,10 @@ def _auth_error_text(exc: Exception) -> str:
         return f"{type(exc).__name__}: {exc}"
     classified = classify_error(exc)
     if classified is None:
-        return type(exc).__name__
+        # A 404 (server root instead of /za/WebAPI/api) is unclassified but
+        # the status is the whole signal; it is an int, so it can be shown.
+        status = source_status_code(exc)
+        return f"{type(exc).__name__} (HTTP {status})" if status else type(exc).__name__
     return format_classified_error(classified, include_message=False)
 
 
@@ -129,32 +146,23 @@ REFERENCE_TAGS_TTL_SECONDS = 120
 reference_tag_index = TagIndex(ttl_seconds=REFERENCE_TAGS_TTL_SECONDS)
 
 
-def _tag_cache_scope(token: str) -> str:
-    """Cache scope for both tag indexes: a digest of the token.
-
-    CMORE scopes tag visibility by the token's ShareGroup, so the token is
-    what actually decides which tags a fetch returns. Keying by integration
-    id fails both paths: the portal's draft (ephemeral) runs mint a fresh id
-    per call, so the reference cache would never hit; and on the delivery
-    path a rotated token would keep serving the old token's tag view until a
-    restart. The digest keeps the token itself out of cache keys and logs."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
-
-
 async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     """Tag index for reference actions, cached for REFERENCE_TAGS_TTL_SECONDS
-    per (base_url, token)."""
+    per (base_url, token). Keyed by token rather than integration id because
+    the portal's draft (ephemeral) runs mint a fresh id per call, so an
+    id-keyed cache would never hit and every dropdown in the tag -> fields ->
+    options cascade would pay the full get_tags fetch."""
     auth = _get_auth_config(integration)
-    await _check_draft_api_base_url(auth.base_url)
     token = auth.token.get_secret_value()
-    scope = _tag_cache_scope(token)
     # A hit is the common case in the dropdown cascade; do not build an httpx
-    # client (synchronous SSL setup) for a call that sends nothing.
-    cached = reference_tag_index.peek(auth.base_url, scope)
+    # client (synchronous SSL setup), or run the draft URL policy's DNS
+    # resolution, for a call that sends nothing. The entry passed the policy
+    # when it was fetched.
+    cached = reference_tag_index.peek(auth.base_url, cache_scope_for_token(token))
     if cached is not None:
         return cached
-    async with CmoreClient(base_url=auth.base_url, token=token) as client:
-        return await reference_tag_index.get_index(client, auth.base_url, scope)
+    async with _cmore_client(auth.base_url, token) as client:
+        return await reference_tag_index.get_index(client)
 
 
 async def action_list_tag_names(
@@ -261,10 +269,7 @@ async def action_list_classification_values(
 ):
     """Reference action: next level of the CMORE classification tree."""
     auth = _get_auth_config(integration)
-    await _check_draft_api_base_url(auth.base_url)
-    async with CmoreClient(
-        base_url=auth.base_url, token=auth.token.get_secret_value()
-    ) as client:
+    async with _cmore_client(auth.base_url, auth.token.get_secret_value()) as client:
         tree = await client.get_classification_tree()
     values = _classification_options(tree, action_config)
     return ReferenceDataResponse(
@@ -416,7 +421,7 @@ async def _push_observation(
 
     request = _gnode_request_for(observation, action_config, subject_key, track_source_type)
 
-    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+    async with _cmore_client(auth.base_url, auth.token.get_secret_value()) as client:
         try:
             client_id, was_created = await _resolve_client_id(
                 client, integration_id, subject_key, request
@@ -563,8 +568,6 @@ def _resolve_field_values(field_info, mapping_field, raw_value) -> list:
 
 async def _build_event_tag(
     client: CmoreClient,
-    base_url: str,
-    scope: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
 ) -> Optional[CmoreEventTag]:
@@ -574,7 +577,7 @@ async def _build_event_tag(
     the event still gets posted (with description + location), just without
     the structured tag.
     """
-    tag_info = await tag_index.get(client, base_url, scope, mapping.tag)
+    tag_info = await tag_index.get(client, mapping.tag)
     if tag_info is None:
         logger.warning(
             "CMORE tag %r not found on instance; dropping tag from event "
@@ -705,12 +708,10 @@ async def _push_event(
             known,
         )
 
-    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+    async with _cmore_client(auth.base_url, auth.token.get_secret_value()) as client:
         tags = None
         if mapping is not None:
-            tag = await _build_event_tag(
-                client, auth.base_url, _tag_cache_scope(auth.token.get_secret_value()), mapping, event
-            )
+            tag = await _build_event_tag(client, mapping, event)
             if tag is not None:
                 tags = [tag]
 
@@ -920,7 +921,7 @@ async def _push_event_update_as_comment(
         return {"dropped": True, "reason": "unrecognised_changes"}
 
     auth = _get_auth_config(integration)
-    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+    async with _cmore_client(auth.base_url, auth.token.get_secret_value()) as client:
         cmore_comment = CmoreComment(
             description=comment_text,
             rootMessageId=cmore_message_id,
@@ -991,7 +992,7 @@ async def _push_attachment_as_comment(
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
     auth = _get_auth_config(integration)
-    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
+    async with _cmore_client(auth.base_url, auth.token.get_secret_value()) as client:
         cmore_comment = CmoreComment(
             description=f"EarthRanger attachment: {filename}",
             rootMessageId=int(cmore_message_id),

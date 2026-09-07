@@ -1491,16 +1491,17 @@ async def test_action_auth_on_a_draft_reduces_an_unclassified_error_to_its_type(
 
 
 @pytest.mark.asyncio
-async def test_deliver_keys_the_tag_cache_by_token_not_integration_id(
+async def test_deliver_resolves_tags_through_the_client_that_fetches_them(
     mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
 ):
-    """CMORE scopes tag visibility by the token. Keyed by integration id, the
-    process-lifetime delivery cache kept serving a rotated token's old tag
-    view until a restart; keyed by the token's digest, rotation invalidates."""
+    """TagIndex keys its cache by the client's own base_url and token digest,
+    so deliver hands it the client and nothing else: the cache key cannot
+    disagree with the credentials the fetch used (a rotated token gets a
+    fresh entry instead of the old token's tag view)."""
     from app.actions import handlers as handlers_module
-    from app.actions.handlers import _tag_cache_scope, action_deliver
+    from app.actions.handlers import action_deliver
 
-    _patch_cmore_client(mocker)
+    inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
     get = mocker.patch.object(handlers_module.tag_index, "get", AsyncMock(return_value=fake_tag_info))
@@ -1508,7 +1509,33 @@ async def test_deliver_keys_the_tag_cache_by_token_not_integration_id(
     delivery = GundiDelivery(payload=event, provider=provider_info)
     await action_deliver(integration, deliver_config, delivery, metadata)
 
-    scope = get.await_args.args[2]
-    assert scope == _tag_cache_scope("test-token")
-    assert scope != str(integration.id)
-    assert "test-token" not in scope
+    get.assert_awaited_once_with(inner, deliver_config.event_type_to_tag[0].tag)
+
+
+@pytest.mark.asyncio
+async def test_action_auth_on_a_draft_keeps_the_status_of_an_unclassified_http_error(
+    mocker, integration
+):
+    """A wrong path (server root instead of /za/WebAPI/api) is a 404, which
+    classify_error does not label; the status is the whole signal."""
+    import httpx
+
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+    from app.services.activity_logger import ephemeral_run
+
+    request = httpx.Request("GET", "https://cmore.test/v2/clients/virtual/gateway_mapping")
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(
+        side_effect=httpx.HTTPStatusError("404", request=request, response=httpx.Response(404, request=request))
+    )
+    _mock_cmore_client_cls(mocker, instance)
+    config = AuthenticateConfig(token="t", base_url="https://cmore.test", owner_group_id=1)
+
+    token = ephemeral_run.set(True)
+    try:
+        result = await action_auth(integration, config)
+    finally:
+        ephemeral_run.reset(token)
+
+    assert result == {"valid_credentials": False, "error": "HTTPStatusError (HTTP 404)"}

@@ -12,10 +12,12 @@ from app.actions.tests.test_handlers import _integration_dict
 from app.services.errors import IntegrationConfigurationError
 
 
-def make_integration(integration_id: str = None, token: str = None) -> Integration:
+def make_integration(integration_id: str = None, token: str = None, base_url: str = None) -> Integration:
     data = _integration_dict(integration_id or str(uuid.uuid4()))
     if token is not None:
         data["configurations"][0]["data"]["token"] = token
+    if base_url is not None:
+        data["configurations"][0]["data"]["base_url"] = base_url
     return Integration.parse_obj(data)
 
 
@@ -80,11 +82,25 @@ def mock_cmore_client(mocker):
     instance = MagicMock()
     instance.get_tags = AsyncMock(return_value=RAW_TAGS)
     instance.get_classification_tree = AsyncMock(return_value=[])
-    client_cls = MagicMock()
-    client_cls.return_value.__aenter__ = AsyncMock(return_value=instance)
-    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-    mocker.patch.object(handlers_module, "CmoreClient", client_cls)
+    mocker.patch.object(handlers_module, "CmoreClient", _client_cls_yielding(instance))
     return instance
+
+
+def _client_cls_yielding(instance):
+    """A CmoreClient stand-in: `async with CmoreClient(base_url=, token=)`
+    yields `instance`, carrying the base_url and cache_scope the real client
+    would derive from those arguments (TagIndex reads them)."""
+    from app.datasource.client import cache_scope_for_token
+
+    def construct(base_url, token=None, **kwargs):
+        instance.base_url = base_url
+        instance.cache_scope = cache_scope_for_token(token or "")
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=instance)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    return MagicMock(side_effect=construct)
 
 
 @pytest.mark.asyncio
@@ -385,27 +401,13 @@ async def test_reference_cache_hit_does_not_open_a_cmore_client(integration, moc
     handlers_module.reference_tag_index._reset()
     instance = MagicMock()
     instance.get_tags = AsyncMock(return_value=RAW_TAGS)
-    client_cls = MagicMock()
-    client_cls.return_value.__aenter__ = AsyncMock(return_value=instance)
-    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    client_cls = _client_cls_yielding(instance)
     mocker.patch.object(handlers_module, "CmoreClient", client_cls)
 
     await action_list_tag_names(integration, ListTagNamesQuery())
     await action_list_tag_names(integration, ListTagNamesQuery())
 
     assert client_cls.call_count == 1
-
-
-def test_reference_tag_cache_key_does_not_carry_the_token():
-    """The cache key is what shows up in logs and in a heap dump; it must be a
-    digest of the token, never the token itself."""
-    from app.actions.handlers import _tag_cache_scope
-
-    scope = _tag_cache_scope("secret-token-value")
-
-    assert "secret-token-value" not in scope
-    assert scope == _tag_cache_scope("secret-token-value")
-    assert scope != _tag_cache_scope("other-token")
 
 
 @pytest.mark.asyncio
@@ -442,6 +444,7 @@ def block_private_addresses(mocker):
     import app.services.url_policy as url_policy
 
     mocker.patch.object(settings, "EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES", True)
+    mocker.patch.object(settings, "EPHEMERAL_BASE_URL_ALLOWLIST", [])
     return mocker.patch.object(url_policy, "_resolve_addresses", AsyncMock(return_value=["10.1.2.3"]))
 
 
@@ -451,14 +454,42 @@ async def test_draft_reference_action_refuses_an_api_base_url_the_policy_blocks(
 ):
     """The template's guard checks integration.base_url, which this connector
     never reads: the CMORE URL is AuthenticateConfig.base_url. The connector
-    applies the same policy to that field on drafts. The message stays fixed;
-    the hostname is a submitted value."""
+    applies the same policy to that field on drafts and forwards the policy's
+    own text, as the template's guard does: it names the host and the
+    resolved address, never the URL's path, query or userinfo."""
     with _draft(), pytest.raises(IntegrationConfigurationError) as info:
         await action_list_tag_names(integration, ListTagNamesQuery())
 
-    assert "cmorewc1" not in str(info.value)
-    assert "API Base URL" in str(info.value)
+    assert str(info.value).startswith("API Base URL resolves to a private or reserved address (10.1.2.3)")
+    assert "/za/WebAPI" not in str(info.value)
+    block_private_addresses.assert_awaited_once()
     assert mock_cmore_client.get_tags.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_draft_url_policy_explains_a_non_https_url(
+    integration, mock_cmore_client, block_private_addresses
+):
+    """The common mistakes (http, no scheme) get the policy's specific text,
+    not a generic 'not allowed' verdict."""
+    with _draft(), pytest.raises(IntegrationConfigurationError, match="only 'https' is permitted"):
+        await action_list_tag_names(make_integration(base_url="http://cmore.test/api"), ListTagNamesQuery())
+
+    block_private_addresses.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_draft_url_policy_runs_only_on_a_cache_miss(
+    integration, mock_cmore_client, block_private_addresses
+):
+    """A cache hit sends nothing, so it must not pay (or fail on) a DNS
+    resolution; the entry was checked when it was fetched."""
+    await action_list_tag_names(integration, ListTagNamesQuery())  # saved-integration call fills the cache
+    with _draft():
+        result = await action_list_tag_names(integration, ListTagNamesQuery())
+
+    assert result["options"]
+    block_private_addresses.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -473,7 +504,9 @@ async def test_draft_classification_values_and_auth_apply_the_same_policy(
     config = AuthenticateConfig(token="t", base_url="https://cmore.test/api", owner_group_id=1)
     with _draft(), pytest.raises(IntegrationConfigurationError):
         await action_auth(integration, config)
+    assert block_private_addresses.await_count == 2
     assert mock_cmore_client.get_classification_tree.await_count == 0
+    assert mock_cmore_client.get_gateway_mapping.await_count == 0
 
 
 @pytest.mark.asyncio

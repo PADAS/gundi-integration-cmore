@@ -196,11 +196,15 @@ title, for example `Authentication failed (HTTP 401)`; the credential test
 reports the same short form on a draft.
 
 If the runner is deployed with `EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES`
-on, the **API Base URL** of a draft auth config must be `https` and resolve to
-a public address (or a host in `EPHEMERAL_BASE_URL_ALLOWLIST`); otherwise the
-reference actions and the credential test refuse it with `API Base URL is not
-allowed by this deployment's outbound URL policy.` Saved integrations are not
-re-checked.
+on, the **API Base URL** of a draft auth config must be `https` and resolve
+only to public addresses; if `EPHEMERAL_BASE_URL_ALLOWLIST` is set as well,
+the hostname must additionally be on that list (the allowlist narrows, it
+does not exempt). Otherwise the reference actions and the credential test
+refuse it with the policy's own text, for example `API Base URL scheme 'http'
+is not allowed; only 'https' is permitted.` or `API Base URL resolves to a
+private or reserved address (10.0.0.5), which is blocked to prevent SSRF.`
+Saved integrations are not re-checked, and a cached tag list is served
+without re-running the check.
 
 ### Multiple EarthRanger providers on one CMORE destination
 

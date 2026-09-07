@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from typing import List, Optional
@@ -54,19 +55,36 @@ def _safe_json(response: httpx.Response, default):
     return response.json()
 
 
+def _normalize_token(token: Optional[str]) -> str:
+    """The raw token: tolerate a value that already carries the "Token " prefix."""
+    raw = (token or "").strip()
+    if raw.lower().startswith("token "):
+        raw = raw[6:].strip()
+    return raw
+
+
+def cache_scope_for_token(token: Optional[str]) -> str:
+    """Digest of the (normalised) token, for keying per-token caches without
+    holding the token itself. CMORE scopes tag visibility by the token's
+    ShareGroup, so the token is what decides what a fetch returns."""
+    return hashlib.sha256(_normalize_token(token).encode("utf-8")).hexdigest()[:16]
+
+
 class CmoreClient:
     def __init__(self, base_url: str, token: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT):
         # No default Content-Type: httpx infers it per request (json= → JSON,
         # data=+files= → multipart with boundary). A client-level default would
         # override the multipart boundary header and break file uploads.
         headers = {}
-        if token:
-            # Tolerate tokens that already include the "Token " prefix.
-            raw = token.strip()
-            if raw.lower().startswith("token "):
-                raw = raw[6:].strip()
+        raw = _normalize_token(token)
+        if raw:
             headers["Authorization"] = f"Token {raw}"
         self._client = httpx.AsyncClient(base_url=base_url, headers=headers, timeout=timeout)
+        # Read by TagIndex: the cache key of anything fetched through this
+        # client is (base_url, cache_scope), so it can never disagree with
+        # the credentials that did the fetching.
+        self.base_url = base_url
+        self.cache_scope = cache_scope_for_token(token)
         # get_tags always gets at least TAGS_TIMEOUT, but an explicitly larger
         # client timeout (e.g. `validate --timeout 300`) wins.
         self._tags_timeout = max(TAGS_TIMEOUT, timeout)
