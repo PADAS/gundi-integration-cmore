@@ -103,10 +103,10 @@ async def action_list_tag_fields(integration, action_config: ListTagFieldsQuery)
 ```
 
 Registration emits it with `"type": "reference"` (new `ActionTypeEnum` value)
-and `is_periodic_action: false`. In the CMORE runner this is gated behind a
-default-off `REGISTER_REFERENCE_ACTIONS` env flag so nothing reaches the API
-until the platform accepts the type — flipping that flag is the only
-integration-side step left.
+and `is_periodic_action: false`. The platform now accepts the type, so the
+template (and this runner, since the Sept 2026 upstream sync) always registers
+reference actions; the interim default-off `REGISTER_REFERENCE_ACTIONS` flag
+has been removed.
 
 ### The `gundi:reference` ui_schema annotation (already registered by runners)
 
@@ -211,8 +211,8 @@ a fast-follow in `gundi-integration-earthranger` once Phase 1 lands.
 ## Rollout
 
 1. Platform ships asks 1-2 (API) — backward compatible; no integration changes.
-2. CMORE runner flips `REGISTER_REFERENCE_ACTIONS=true` in dev → reference
-   actions appear in registration; validates ask 1-2 end-to-end.
+2. CMORE runner registers reference actions (always on since the Sept 2026
+   template sync) → validates ask 1-2 end-to-end.
 3. Portal ships ask 3 → CMORE mapping form gets working dropdowns with zero
    further integration-side changes (annotations are already live).
 4. Template upstreaming (mixin + envelope + docs) → any integration can adopt

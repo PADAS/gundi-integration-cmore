@@ -1,5 +1,10 @@
 # Reference Data Actions (Phase 0) Implementation Plan
 
+> **Superseded (2026-09):** the `REGISTER_REFERENCE_ACTIONS` flag this plan introduces was removed in the
+> September 2026 template sync (PR #35). The template always registers reference actions with type `reference`
+> (upstream PR #101); nothing reads the flag any more. The rest of this plan is kept as history of how the
+> reference actions were built. Do not re-add the flag or the registration gate in `self_registration.py`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the Phase 0 (this-repo, no-platform-dependency) scope of the approved spec `docs/superpowers/specs/2026-07-31-reference-data-config-ui-design.md`: the reference-action contract, four CMORE reference actions, inert `gundi:reference` ui_schema annotations on `DeliverConfig`, and tests.

@@ -4,14 +4,23 @@ import pytest
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
+from gundi_core.schemas.v2 import Integration
+
+from app.actions.configurations import ListTagNamesQuery
+from app.actions.handlers import action_list_tag_names
+from app.actions.tests.test_handlers import _integration_dict
+
+
+def make_integration(integration_id: str = None, token: str = None) -> Integration:
+    data = _integration_dict(integration_id or str(uuid.uuid4()))
+    if token is not None:
+        data["configurations"][0]["data"]["token"] = token
+    return Integration.parse_obj(data)
+
 
 def test_reference_contract_types():
-    from app.actions.core import (
-        ActionConfiguration,
-        ReferenceActionConfiguration,
-        ReferenceDataResponse,
-        ReferenceOption,
-    )
+    from app.actions.core import ActionConfiguration, ReferenceActionConfiguration
+    from app.actions.reference_data import ReferenceDataResponse, ReferenceOption
 
     assert issubclass(ReferenceActionConfiguration, ActionConfiguration)
 
@@ -54,18 +63,19 @@ RAW_TAGS = [
 
 @pytest.fixture
 def integration():
-    from gundi_core.schemas.v2 import Integration
-    from app.actions.tests.test_handlers import _integration_dict
-
-    return Integration.parse_obj(_integration_dict(str(uuid.uuid4())))
+    return make_integration()
 
 
 @pytest.fixture
 def mock_cmore_client(mocker):
     """Patch CmoreClient in handlers; returns the mock instance the
-    `async with CmoreClient(...) as client:` block yields."""
+    `async with CmoreClient(...) as client:` block yields. Also empties the
+    reference tag cache: it is keyed by (base_url, token), which every test
+    integration here shares, so one test's tags would otherwise serve the
+    next."""
     from app.actions import handlers as handlers_module
 
+    handlers_module.reference_tag_index._reset()
     instance = MagicMock()
     instance.get_tags = AsyncMock(return_value=RAW_TAGS)
     instance.get_classification_tree = AsyncMock(return_value=[])
@@ -325,12 +335,65 @@ async def test_reference_actions_share_a_ttl_cached_tag_fetch(
     """The dropdown cascade (tag → fields → options) must not pay the ~25s
     production get_tags fetch once per dropdown — calls within the TTL window
     reuse one fetch."""
-    from app.actions import handlers as handlers_module
-    from app.actions.configurations import ListTagNamesQuery
-    from app.actions.handlers import action_list_tag_names
-
-    handlers_module.reference_tag_index._reset()
     await action_list_tag_names(integration, ListTagNamesQuery())
     await action_list_tag_names(integration, ListTagNamesQuery())
 
     assert mock_cmore_client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reference_tag_cache_is_shared_across_runs_with_the_same_credentials(
+    mock_cmore_client,
+):
+    """On the ephemeral (portal draft) path the runner mints a fresh
+    integration id per run, so a cache keyed by integration id never hits and
+    every dropdown pays the full get_tags fetch. Tag visibility is scoped by
+    the token, so the cache is keyed by (base_url, token) instead."""
+    await action_list_tag_names(make_integration(), ListTagNamesQuery())
+    await action_list_tag_names(make_integration(), ListTagNamesQuery())
+
+    assert mock_cmore_client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reference_tag_cache_is_separate_per_token(mock_cmore_client):
+    """Two tokens against the same CMORE may see different tag sets."""
+    integration_id = str(uuid.uuid4())
+    await action_list_tag_names(make_integration(integration_id), ListTagNamesQuery())
+    await action_list_tag_names(
+        make_integration(integration_id, token="another-token"), ListTagNamesQuery()
+    )
+
+    assert mock_cmore_client.get_tags.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reference_cache_hit_does_not_open_a_cmore_client(integration, mocker):
+    """CmoreClient.__init__ builds an httpx client (synchronous SSL setup);
+    a cache hit, the common case in the dropdown cascade, must not pay it."""
+    from app.actions import handlers as handlers_module
+
+    handlers_module.reference_tag_index._reset()
+    instance = MagicMock()
+    instance.get_tags = AsyncMock(return_value=RAW_TAGS)
+    client_cls = MagicMock()
+    client_cls.return_value.__aenter__ = AsyncMock(return_value=instance)
+    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    mocker.patch.object(handlers_module, "CmoreClient", client_cls)
+
+    await action_list_tag_names(integration, ListTagNamesQuery())
+    await action_list_tag_names(integration, ListTagNamesQuery())
+
+    assert client_cls.call_count == 1
+
+
+def test_reference_tag_cache_key_does_not_carry_the_token():
+    """The cache key is what shows up in logs and in a heap dump; it must be a
+    digest of the token, never the token itself."""
+    from app.actions.handlers import _reference_cache_scope
+
+    scope = _reference_cache_scope("secret-token-value")
+
+    assert "secret-token-value" not in scope
+    assert scope == _reference_cache_scope("secret-token-value")
+    assert scope != _reference_cache_scope("other-token")
