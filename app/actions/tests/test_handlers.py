@@ -1427,3 +1427,88 @@ async def test_action_auth_reports_invalid_credentials_on_error(mocker, integrat
 
     assert result["valid_credentials"] is False
     assert "401" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_action_auth_on_a_draft_reports_a_classified_title_without_the_exception_text(
+    mocker, integration
+):
+    """action_auth returns its error as a 200 result, so the runner's draft
+    redaction never sees it. On a draft the text is the classified title (and
+    status), never str(exc), which carries the request URL and can carry a
+    response body."""
+    import httpx
+
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+    from app.services.activity_logger import ephemeral_run
+    from app.services.errors import IntegrationAuthError
+
+    request = httpx.Request("GET", "https://cmore.test/api/v2/clients/virtual/gateway_mapping")
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "Client error '401 Unauthorized' for url 'https://cmore.test/api/v2/clients/virtual/gateway_mapping'",
+            request=request, response=httpx.Response(401, request=request),
+        )
+    )
+    _mock_cmore_client_cls(mocker, instance)
+    config = AuthenticateConfig(token="bad", base_url="https://cmore.test/api", owner_group_id=1)
+
+    token = ephemeral_run.set(True)
+    try:
+        result = await action_auth(integration, config)
+    finally:
+        ephemeral_run.reset(token)
+
+    assert result["valid_credentials"] is False
+    assert result["error"] == f"{IntegrationAuthError.default_title} (HTTP 401)"
+    assert "gateway_mapping" not in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_action_auth_on_a_draft_reduces_an_unclassified_error_to_its_type(
+    mocker, integration
+):
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+    from app.services.activity_logger import ephemeral_run
+
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(
+        side_effect=ValueError("bad payload from https://cmore.test/api?token=leak")
+    )
+    _mock_cmore_client_cls(mocker, instance)
+    config = AuthenticateConfig(token="t", base_url="https://cmore.test/api", owner_group_id=1)
+
+    token = ephemeral_run.set(True)
+    try:
+        result = await action_auth(integration, config)
+    finally:
+        ephemeral_run.reset(token)
+
+    assert result == {"valid_credentials": False, "error": "ValueError"}
+
+
+@pytest.mark.asyncio
+async def test_deliver_keys_the_tag_cache_by_token_not_integration_id(
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
+):
+    """CMORE scopes tag visibility by the token. Keyed by integration id, the
+    process-lifetime delivery cache kept serving a rotated token's old tag
+    view until a restart; keyed by the token's digest, rotation invalidates."""
+    from app.actions import handlers as handlers_module
+    from app.actions.handlers import _tag_cache_scope, action_deliver
+
+    _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    get = mocker.patch.object(handlers_module.tag_index, "get", AsyncMock(return_value=fake_tag_info))
+
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    scope = get.await_args.args[2]
+    assert scope == _tag_cache_scope("test-token")
+    assert scope != str(integration.id)
+    assert "test-token" not in scope

@@ -27,7 +27,10 @@ from app.datasource.schemas import (
     UploadType,
 )
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
-from app.services.activity_logger import activity_logger, log_action_activity
+from app import settings
+from app.services.activity_logger import activity_logger, ephemeral_run, log_action_activity
+from app.services.errors import IntegrationConfigurationError, classify_error, format_classified_error
+from app.services.url_policy import validate_outbound_url
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
 from .state import CmoreStateManager
@@ -50,8 +53,32 @@ state_manager = CmoreStateManager()
 def _get_auth_config(integration: Integration) -> AuthenticateConfig:
     auth_config = integration.get_action_config("auth")
     if not auth_config:
-        raise ValueError("Authentication configuration (auth) is required.")
+        # IntegrationConfigurationError messages reach the portal on a draft
+        # (as a 422), where every other connector message is redacted, so by
+        # contract they describe the problem without echoing submitted values.
+        raise IntegrationConfigurationError("Authentication configuration (auth) is required.")
     return AuthenticateConfig.parse_obj(auth_config.data)
+
+
+async def _check_draft_api_base_url(base_url: str) -> None:
+    """Apply the runner's outbound URL policy to the CMORE API Base URL on a
+    draft run. The template's own guard (action_runner) checks
+    integration.base_url, which this connector never reads: every CmoreClient
+    is built from AuthenticateConfig.base_url, so without this the setting
+    would protect a field nothing uses."""
+    if not (settings.EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES and ephemeral_run.get()):
+        return
+    try:
+        await validate_outbound_url(
+            base_url, allowlist=settings.EPHEMERAL_BASE_URL_ALLOWLIST, what="API Base URL",
+        )
+    except ValueError as e:
+        # The policy text names the host and the resolved address; that is a
+        # submitted value, so it goes to the log and a fixed message to the user.
+        logger.warning("Draft API Base URL refused by the outbound URL policy: %s", e)
+        raise IntegrationConfigurationError(
+            "API Base URL is not allowed by this deployment's outbound URL policy."
+        ) from None
 
 
 def _track_no_for(subject_key: str) -> int:
@@ -66,6 +93,7 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
     token = action_config.token.get_secret_value()
     if not token or not action_config.base_url:
         return {"valid_credentials": False, "error": "base_url and token are required."}
+    await _check_draft_api_base_url(action_config.base_url)
     try:
         async with CmoreClient(base_url=action_config.base_url, token=token) as client:
             # gateway_mapping is a tiny authenticated read (401 on a bad token)
@@ -75,8 +103,21 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
             # visibility is covered by the validate CLI and reference actions.
             await client.get_gateway_mapping()
     except Exception as e:
-        return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
+        return {"valid_credentials": False, "error": _auth_error_text(e)}
     return {"valid_credentials": True}
+
+
+def _auth_error_text(exc: Exception) -> str:
+    """The error a failed credential test reports. It travels inside a 200
+    result, so the runner's draft redaction never sees it: on a draft, use the
+    classified title and status only (str(exc) carries the request URL and can
+    carry a response body); a saved integration keeps the verbose text."""
+    if not ephemeral_run.get():
+        return f"{type(exc).__name__}: {exc}"
+    classified = classify_error(exc)
+    if classified is None:
+        return type(exc).__name__
+    return format_classified_error(classified, include_message=False)
 
 
 # Short-TTL tag cache for reference actions (config-time UX). Separate from
@@ -88,15 +129,15 @@ REFERENCE_TAGS_TTL_SECONDS = 120
 reference_tag_index = TagIndex(ttl_seconds=REFERENCE_TAGS_TTL_SECONDS)
 
 
-def _reference_cache_scope(token: str) -> str:
-    """Cache scope for the reference tag index: a digest of the token.
+def _tag_cache_scope(token: str) -> str:
+    """Cache scope for both tag indexes: a digest of the token.
 
     CMORE scopes tag visibility by the token's ShareGroup, so the token is
-    what actually decides which tags a fetch returns. The integration id is
-    not usable here: the portal's draft (ephemeral) runs mint a fresh id per
-    call, so an id-keyed cache would never hit and every dropdown in the
-    tag -> fields -> options cascade would pay the full get_tags fetch. The
-    digest keeps the token itself out of cache keys and log lines."""
+    what actually decides which tags a fetch returns. Keying by integration
+    id fails both paths: the portal's draft (ephemeral) runs mint a fresh id
+    per call, so the reference cache would never hit; and on the delivery
+    path a rotated token would keep serving the old token's tag view until a
+    restart. The digest keeps the token itself out of cache keys and logs."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
@@ -104,8 +145,9 @@ async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     """Tag index for reference actions, cached for REFERENCE_TAGS_TTL_SECONDS
     per (base_url, token)."""
     auth = _get_auth_config(integration)
+    await _check_draft_api_base_url(auth.base_url)
     token = auth.token.get_secret_value()
-    scope = _reference_cache_scope(token)
+    scope = _tag_cache_scope(token)
     # A hit is the common case in the dropdown cascade; do not build an httpx
     # client (synchronous SSL setup) for a call that sends nothing.
     cached = reference_tag_index.peek(auth.base_url, scope)
@@ -137,6 +179,9 @@ async def action_list_tag_names(
     return ReferenceDataResponse(options=options).dict()
 
 
+_UNKNOWN_TAG = "The selected CMORE tag is not visible to this integration's token."
+
+
 async def action_list_tag_fields(
     integration: Integration, action_config: ListTagFieldsQuery
 ):
@@ -144,9 +189,7 @@ async def action_list_tag_fields(
     index = await _fetch_tag_index(integration)
     tag = index.resolve(action_config.tag)
     if tag is None:
-        raise ValueError(
-            f"Unknown CMORE tag {action_config.tag!r} for this integration."
-        )
+        raise IntegrationConfigurationError(_UNKNOWN_TAG)
     options = [
         ReferenceOption(
             value=str(f.id),
@@ -169,14 +212,11 @@ async def action_list_field_options(
     index = await _fetch_tag_index(integration)
     tag = index.resolve(action_config.tag)
     if tag is None:
-        raise ValueError(
-            f"Unknown CMORE tag {action_config.tag!r} for this integration."
-        )
+        raise IntegrationConfigurationError(_UNKNOWN_TAG)
     field_info = tag.resolve_field(action_config.field)
     if field_info is None:
-        raise ValueError(
-            f"Unknown field {action_config.field!r} in CMORE tag "
-            f"{action_config.tag!r}."
+        raise IntegrationConfigurationError(
+            "The selected field is not in the selected CMORE tag; pick the tag again."
         )
     if field_info.data_type not in ("Lookup", "FixedLookup"):
         return ReferenceDataResponse(options=[]).dict()
@@ -200,22 +240,19 @@ def _classification_options(tree: list, query) -> list:
         (n for n in tree if n.get("battleDimension") == query.battleDimension), None
     )
     if node is None:
-        raise ValueError(f"Unknown battleDimension {query.battleDimension!r}.")
+        raise IntegrationConfigurationError("The selected battleDimension is not in the CMORE classification tree.")
     forces = node.get("forces") or []
     if not query.force:
         return [f["force"] for f in forces if f.get("force")]
     force_node = next((f for f in forces if f.get("force") == query.force), None)
     if force_node is None:
-        raise ValueError(
-            f"Unknown force {query.force!r} under battleDimension "
-            f"{query.battleDimension!r}."
-        )
+        raise IntegrationConfigurationError("The selected force is not under the selected battleDimension.")
     types = force_node.get("types") or []
     if not query.type:
         return [t["type"] for t in types if t.get("type")]
     type_node = next((t for t in types if t.get("type") == query.type), None)
     if type_node is None:
-        raise ValueError(f"Unknown type {query.type!r} under force {query.force!r}.")
+        raise IntegrationConfigurationError("The selected type is not under the selected force.")
     return [r for r in (type_node.get("roles") or []) if r]
 
 
@@ -224,6 +261,7 @@ async def action_list_classification_values(
 ):
     """Reference action: next level of the CMORE classification tree."""
     auth = _get_auth_config(integration)
+    await _check_draft_api_base_url(auth.base_url)
     async with CmoreClient(
         base_url=auth.base_url, token=auth.token.get_secret_value()
     ) as client:
@@ -526,7 +564,7 @@ def _resolve_field_values(field_info, mapping_field, raw_value) -> list:
 async def _build_event_tag(
     client: CmoreClient,
     base_url: str,
-    integration_id: str,
+    scope: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
 ) -> Optional[CmoreEventTag]:
@@ -536,7 +574,7 @@ async def _build_event_tag(
     the event still gets posted (with description + location), just without
     the structured tag.
     """
-    tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag)
+    tag_info = await tag_index.get(client, base_url, scope, mapping.tag)
     if tag_info is None:
         logger.warning(
             "CMORE tag %r not found on instance; dropping tag from event "
@@ -671,7 +709,7 @@ async def _push_event(
         tags = None
         if mapping is not None:
             tag = await _build_event_tag(
-                client, auth.base_url, str(integration.id), mapping, event
+                client, auth.base_url, _tag_cache_scope(auth.token.get_secret_value()), mapping, event
             )
             if tag is not None:
                 tags = [tag]

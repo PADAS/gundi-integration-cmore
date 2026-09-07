@@ -9,6 +9,7 @@ from gundi_core.schemas.v2 import Integration
 from app.actions.configurations import ListTagNamesQuery
 from app.actions.handlers import action_list_tag_names
 from app.actions.tests.test_handlers import _integration_dict
+from app.services.errors import IntegrationConfigurationError
 
 
 def make_integration(integration_id: str = None, token: str = None) -> Integration:
@@ -170,8 +171,12 @@ async def test_list_tag_fields_unknown_tag_raises(integration, mock_cmore_client
     from app.actions.configurations import ListTagFieldsQuery
     from app.actions.handlers import action_list_tag_fields
 
-    with pytest.raises(ValueError, match="No Such Tag"):
+    with pytest.raises(IntegrationConfigurationError) as info:
         await action_list_tag_fields(integration, ListTagFieldsQuery(tag="No Such Tag"))
+    # The message is forwarded to the portal on a draft; it must describe the
+    # problem without echoing the submitted value.
+    assert "No Such Tag" not in str(info.value)
+    assert "tag" in str(info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -261,11 +266,13 @@ async def test_list_field_options_unknown_field_raises(integration, mock_cmore_c
     from app.actions.configurations import ListFieldOptionsQuery
     from app.actions.handlers import action_list_field_options
 
-    with pytest.raises(ValueError, match="No Such Field"):
+    with pytest.raises(IntegrationConfigurationError) as info:
         await action_list_field_options(
             integration,
             ListFieldOptionsQuery(tag="Evidence of Poacher", field="No Such Field"),
         )
+    assert "No Such Field" not in str(info.value)
+    assert "field" in str(info.value).lower()
 
 
 CLASSIFICATION_TREE = [
@@ -322,10 +329,12 @@ async def test_list_classification_values_unknown_branch_raises(
     mock_cmore_client.get_classification_tree = AsyncMock(
         return_value=CLASSIFICATION_TREE
     )
-    with pytest.raises(ValueError, match="SEA"):
+    with pytest.raises(IntegrationConfigurationError) as info:
         await action_list_classification_values(
             integration, ListClassificationValuesQuery(battleDimension="SEA")
         )
+    assert "SEA" not in str(info.value)
+    assert "battleDimension" in str(info.value)
 
 
 @pytest.mark.asyncio
@@ -390,10 +399,104 @@ async def test_reference_cache_hit_does_not_open_a_cmore_client(integration, moc
 def test_reference_tag_cache_key_does_not_carry_the_token():
     """The cache key is what shows up in logs and in a heap dump; it must be a
     digest of the token, never the token itself."""
-    from app.actions.handlers import _reference_cache_scope
+    from app.actions.handlers import _tag_cache_scope
 
-    scope = _reference_cache_scope("secret-token-value")
+    scope = _tag_cache_scope("secret-token-value")
 
     assert "secret-token-value" not in scope
-    assert scope == _reference_cache_scope("secret-token-value")
-    assert scope != _reference_cache_scope("other-token")
+    assert scope == _tag_cache_scope("secret-token-value")
+    assert scope != _tag_cache_scope("other-token")
+
+
+@pytest.mark.asyncio
+async def test_reference_actions_without_an_auth_config_raise_a_configuration_error(
+    mock_cmore_client,
+):
+    """A portal user opening a dropdown before filling in auth gets a 422 with
+    a fixed message, not a redacted 500."""
+    data = _integration_dict(str(uuid.uuid4()))
+    data["configurations"] = []
+    with pytest.raises(IntegrationConfigurationError, match="Authentication configuration"):
+        await action_list_tag_names(Integration.parse_obj(data), ListTagNamesQuery())
+
+
+# ----- draft (ephemeral) outbound URL policy -----
+
+
+class _draft:
+    """Run a block as the portal's draft path does (ephemeral_run set)."""
+
+    def __enter__(self):
+        from app.services.activity_logger import ephemeral_run
+        self._var, self._token = ephemeral_run, ephemeral_run.set(True)
+
+    def __exit__(self, *exc):
+        self._var.reset(self._token)
+
+
+@pytest.fixture
+def block_private_addresses(mocker):
+    """Turn the draft URL policy on and make every hostname resolve to a
+    private address; returns the resolver mock."""
+    from app import settings
+    import app.services.url_policy as url_policy
+
+    mocker.patch.object(settings, "EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES", True)
+    return mocker.patch.object(url_policy, "_resolve_addresses", AsyncMock(return_value=["10.1.2.3"]))
+
+
+@pytest.mark.asyncio
+async def test_draft_reference_action_refuses_an_api_base_url_the_policy_blocks(
+    integration, mock_cmore_client, block_private_addresses
+):
+    """The template's guard checks integration.base_url, which this connector
+    never reads: the CMORE URL is AuthenticateConfig.base_url. The connector
+    applies the same policy to that field on drafts. The message stays fixed;
+    the hostname is a submitted value."""
+    with _draft(), pytest.raises(IntegrationConfigurationError) as info:
+        await action_list_tag_names(integration, ListTagNamesQuery())
+
+    assert "cmorewc1" not in str(info.value)
+    assert "API Base URL" in str(info.value)
+    assert mock_cmore_client.get_tags.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_draft_classification_values_and_auth_apply_the_same_policy(
+    integration, mock_cmore_client, block_private_addresses
+):
+    from app.actions.configurations import AuthenticateConfig, ListClassificationValuesQuery
+    from app.actions.handlers import action_auth, action_list_classification_values
+
+    with _draft(), pytest.raises(IntegrationConfigurationError):
+        await action_list_classification_values(integration, ListClassificationValuesQuery())
+    config = AuthenticateConfig(token="t", base_url="https://cmore.test/api", owner_group_id=1)
+    with _draft(), pytest.raises(IntegrationConfigurationError):
+        await action_auth(integration, config)
+    assert mock_cmore_client.get_classification_tree.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_url_policy_is_not_applied_to_saved_integrations(
+    integration, mock_cmore_client, block_private_addresses
+):
+    """Off the draft path the URL came from the portal's stored config, as the
+    template's guard also assumes; the policy is a draft-only check."""
+    await action_list_tag_names(integration, ListTagNamesQuery())
+
+    block_private_addresses.assert_not_awaited()
+    assert mock_cmore_client.get_tags.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_url_policy_is_not_applied_when_the_setting_is_off(
+    integration, mock_cmore_client, block_private_addresses, mocker
+):
+    from app import settings
+
+    mocker.patch.object(settings, "EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES", False)
+    with _draft():
+        await action_list_tag_names(integration, ListTagNamesQuery())
+
+    block_private_addresses.assert_not_awaited()
+    assert mock_cmore_client.get_tags.await_count == 1

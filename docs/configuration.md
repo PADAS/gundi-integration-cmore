@@ -183,6 +183,25 @@ if a fetch fails or nothing offers options, the field is a plain free-text
 input (with a retry link on failure). A saved value that's no longer among the
 fetched options gets a warning badge but is **never** changed automatically.
 
+### Errors while a connector is still a draft
+
+Before an integration is saved, the portal runs the CMORE reference actions
+against the draft auth config, and most connector error text is redacted on
+that path. The CMORE reference actions raise configuration problems as fixed
+messages the portal does show: auth not filled in yet, a selected tag that
+this token cannot see, a field or classification value that is no longer under
+its parent (the cascade went stale after a parent changed). CMORE API failures
+(a rejected token, a 5xx, no connection) come through as their classified
+title, for example `Authentication failed (HTTP 401)`; the credential test
+reports the same short form on a draft.
+
+If the runner is deployed with `EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES`
+on, the **API Base URL** of a draft auth config must be `https` and resolve to
+a public address (or a host in `EPHEMERAL_BASE_URL_ALLOWLIST`); otherwise the
+reference actions and the credential test refuse it with `API Base URL is not
+allowed by this deployment's outbound URL policy.` Saved integrations are not
+re-checked.
+
 ### Multiple EarthRanger providers on one CMORE destination
 
 A CMORE integration's Deliver config is shared by **all** of its connections,
