@@ -188,19 +188,25 @@ fetched options gets a warning badge but is **never** changed automatically.
 Before an integration is saved, the portal runs the CMORE reference actions
 against the draft auth config, and most connector error text is redacted on
 that path. The CMORE reference actions raise configuration problems as fixed
-messages the portal does show: auth not filled in yet, a selected tag that
-this token cannot see, a field or classification value that is no longer under
-its parent (the cascade went stale after a parent changed). CMORE API failures
-(a rejected token, a 5xx, no connection) come through as their classified
-title, for example `Authentication failed (HTTP 401)`; the credential test
-reports the same short form on a draft.
+messages the runner does forward (as a 422): auth not filled in yet, a
+selected tag that this token cannot see, a field or classification value that
+is no longer under its parent (the cascade went stale after a parent changed).
+CMORE API failures (a rejected token, a 5xx, no connection) come through with
+their status and classified title, for example `Authentication failed (HTTP
+401)`; on a draft the credential test fails the same way instead of answering
+"invalid credentials" for every kind of failure.
+
+What the portal user reads depends on cdip, which proxies these calls: as of
+September 2026 its proxy keeps the runner's status but replaces the text with
+a fixed "Action runner unreachable" message, so the portal can tell a rejected
+token (401/403) from other failures but does not yet show the messages above.
 
 If the runner is deployed with `EPHEMERAL_BASE_URL_BLOCK_PRIVATE_ADDRESSES`
 on, the **API Base URL** of a draft auth config must be `https` and resolve
 only to public addresses; if `EPHEMERAL_BASE_URL_ALLOWLIST` is set as well,
 the hostname must additionally be on that list (the allowlist narrows, it
 does not exempt). Otherwise the reference actions and the credential test
-refuse it with `Invalid configuration — ` followed by the policy's own text,
+answer 422 with `Invalid configuration — ` followed by the policy's own text,
 for example `API Base URL scheme 'http' is not allowed; only 'https' is
 permitted.` or `API Base URL resolves to a private or reserved address
 (10.0.0.5), which is blocked to prevent SSRF.` Saved integrations are not

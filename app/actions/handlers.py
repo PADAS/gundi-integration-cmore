@@ -78,8 +78,10 @@ async def _check_draft_api_base_url(base_url: str) -> None:
         # surfaces for integration.base_url: it names the scheme, the host and
         # the resolved address, never the URL's userinfo, path or query, and
         # tells the user what to change ("only 'https' is permitted",
-        # "resolves to a private ..."). The runner shows it as
-        # "Invalid configuration — <text>" (422).
+        # "resolves to a private ..."). The runner answers 422 with
+        # "Invalid configuration — <text>". Whether the portal user sees that
+        # text depends on cdip forwarding the runner's body; its ephemeral
+        # proxy currently keeps only the status (see the follow-ups list).
         raise IntegrationConfigurationError(str(e)) from None
 
 
@@ -117,8 +119,9 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
             # The portal reads any 200 {valid_credentials: false} as "invalid
             # credentials", which misdirects a 404 (wrong path) or an outage
             # at the token. On a draft, let the runner classify and redact
-            # the failure instead: 401/403 still read as invalid, the policy
-            # refusal as a 422, everything else as an error.
+            # the failure instead: the status survives cdip's proxy, so
+            # 401/403 still read as invalid, the policy refusal as a 422 and
+            # everything else as an error.
             raise
         # Saved integrations keep the 200 result their reader expects.
         return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
