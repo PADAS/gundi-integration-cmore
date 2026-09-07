@@ -218,10 +218,14 @@ def test_by_id_keeps_both_tags_on_name_collision():
 # ----- TagIndex -----
 
 
-def _make_client_with_get_tags(response):
-    """Build a mock CmoreClient whose get_tags() returns the given response."""
+def _make_client_with_get_tags(response, base_url="https://example/api", scope="int-1"):
+    """Build a mock CmoreClient whose get_tags() returns the given response.
+    TagIndex keys its cache by the client's own base_url and cache_scope (a
+    digest of its token), so the mock carries both."""
     client = MagicMock()
     client.get_tags = AsyncMock(return_value=response)
+    client.base_url = base_url
+    client.cache_scope = scope
     return client
 
 
@@ -230,11 +234,11 @@ async def test_tag_index_get_returns_tag_info():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    tag = await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    tag = await idx.get(client, "Poacher Sighting")
     assert tag is not None
     assert tag.id == 29
     assert tag.fields_by_name["Direction"].id == 1327
-    assert (await idx.get(client, "https://example/api", "int-1", "29")).id == 29
+    assert (await idx.get(client, "29")).id == 29
 
 
 @pytest.mark.asyncio
@@ -242,7 +246,7 @@ async def test_tag_index_get_returns_none_for_unknown_tag():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    tag = await idx.get(client, "https://example/api", "int-1", "Not A Real Tag")
+    tag = await idx.get(client, "Not A Real Tag")
     assert tag is None
 
 
@@ -252,9 +256,9 @@ async def test_tag_index_calls_get_tags_only_once_per_integration():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
-    await idx.get(client, "https://example/api", "int-1", "test tag")
+    await idx.get(client, "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
+    await idx.get(client, "test tag")
 
     assert client.get_tags.await_count == 1
 
@@ -262,7 +266,7 @@ async def test_tag_index_calls_get_tags_only_once_per_integration():
 @pytest.mark.asyncio
 async def test_tag_index_separates_caches_per_base_url():
     idx = TagIndex()
-    client_a = _make_client_with_get_tags(_sample_response())
+    client_a = _make_client_with_get_tags(_sample_response(), base_url="https://a/api")
     client_b = _make_client_with_get_tags(
         [
             {
@@ -276,30 +280,34 @@ async def test_tag_index_separates_caches_per_base_url():
                     }
                 ],
             }
-        ]
+        ],
+        base_url="https://b/api",
+        scope="int-2",
     )
 
-    a_tag = await idx.get(client_a, "https://a/api", "int-1", "Poacher Sighting")
-    b_tag = await idx.get(client_b, "https://b/api", "int-2", "B Only Tag")
+    a_tag = await idx.get(client_a, "Poacher Sighting")
+    b_tag = await idx.get(client_b, "B Only Tag")
 
     assert a_tag.id == 29
     assert b_tag.id == 999
     # 'Poacher Sighting' shouldn't be reachable on b
-    assert await idx.get(client_b, "https://b/api", "int-2", "Poacher Sighting") is None
+    assert await idx.get(client_b, "Poacher Sighting") is None
 
 
 @pytest.mark.asyncio
-async def test_tag_index_separates_caches_per_integration_same_base_url():
-    """Two integrations against the same CMORE may see different tag sets
+async def test_tag_index_separates_caches_per_token_same_base_url():
+    """Two tokens against the same CMORE may see different tag sets
     (per-ShareGroup visibility). The cache MUST not pool them under the same key."""
     idx = TagIndex()
     # Integration A sees nothing (e.g., a ShareGroup with no subscribed tags)
-    client_low_visibility = _make_client_with_get_tags([])
+    client_low_visibility = _make_client_with_get_tags([], base_url="https://shared/api", scope="token-A")
     # Integration B sees the full Wildlife domain
-    client_high_visibility = _make_client_with_get_tags(_sample_response())
+    client_high_visibility = _make_client_with_get_tags(
+        _sample_response(), base_url="https://shared/api", scope="token-B"
+    )
 
-    a_tag = await idx.get(client_low_visibility, "https://shared/api", "int-A", "Poacher Sighting")
-    b_tag = await idx.get(client_high_visibility, "https://shared/api", "int-B", "Poacher Sighting")
+    a_tag = await idx.get(client_low_visibility, "Poacher Sighting")
+    b_tag = await idx.get(client_high_visibility, "Poacher Sighting")
 
     assert a_tag is None              # low-visibility integration: tag absent
     assert b_tag is not None           # high-visibility integration: tag present
@@ -314,9 +322,9 @@ async def test_tag_index_reset_clears_cache():
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
     idx._reset()
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
 
     # Cache was cleared, so get_tags called twice.
     assert client.get_tags.await_count == 2
@@ -332,9 +340,9 @@ async def test_id_mapping_survives_tag_rename():
     renamed[0]["tags"][0]["name"] = "Poacher Sighting (Legacy)"
     client = _make_client_with_get_tags(renamed)
 
-    tag = await idx.get(client, "https://example/api", "int-1", "29")
+    tag = await idx.get(client, "29")
     assert tag is not None and tag.id == 29 and tag.name == "Poacher Sighting (Legacy)"
-    assert await idx.get(client, "https://example/api", "int-1", "Poacher Sighting") is None
+    assert await idx.get(client, "Poacher Sighting") is None
 
 
 # ----- TTL expiry -----
@@ -349,9 +357,9 @@ async def test_tag_index_with_ttl_serves_from_cache_within_window(monkeypatch):
     idx = TagIndex(ttl_seconds=120)
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
     clock["now"] += 119
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
 
     assert client.get_tags.await_count == 1
 
@@ -365,9 +373,9 @@ async def test_tag_index_with_ttl_refetches_after_expiry(monkeypatch):
     idx = TagIndex(ttl_seconds=120)
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
     clock["now"] += 121
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
 
     assert client.get_tags.await_count == 2
 
@@ -382,9 +390,9 @@ async def test_tag_index_without_ttl_never_expires(monkeypatch):
     idx = TagIndex()
     client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
     clock["now"] += 10**9
-    await idx.get(client, "https://example/api", "int-1", "Poacher Sighting")
+    await idx.get(client, "Poacher Sighting")
 
     assert client.get_tags.await_count == 1
 
@@ -394,7 +402,7 @@ async def test_tag_index_get_index_returns_full_index():
     idx = TagIndex(ttl_seconds=120)
     client = _make_client_with_get_tags(_sample_response())
 
-    index = await idx.get_index(client, "https://example/api", "int-1")
+    index = await idx.get_index(client)
 
     assert index.resolve("Poacher Sighting") is not None
     assert client.get_tags.await_count == 1
@@ -416,16 +424,17 @@ async def test_tag_index_fetches_for_different_keys_do_not_serialize():
 
     client_a = MagicMock()
     client_a.get_tags = AsyncMock(side_effect=slow_tags)
-    client_b = _make_client_with_get_tags(_sample_response())
+    client_a.base_url, client_a.cache_scope = "https://a/api", "int-a"
+    client_b = _make_client_with_get_tags(_sample_response(), base_url="https://b/api", scope="int-b")
 
     task_a = asyncio.create_task(
-        idx.get(client_a, "https://a/api", "int-a", "Poacher Sighting")
+        idx.get(client_a, "Poacher Sighting")
     )
     await asyncio.sleep(0)  # let task_a enter its fetch and hold its lock
 
     # With per-key locking, B's fetch completes while A's is still in flight.
     tag_b = await asyncio.wait_for(
-        idx.get(client_b, "https://b/api", "int-b", "Poacher Sighting"), timeout=1.0
+        idx.get(client_b, "Poacher Sighting"), timeout=1.0
     )
     assert tag_b is not None
 
@@ -442,11 +451,10 @@ async def test_tag_index_with_ttl_evicts_expired_entries_and_their_locks(monkeyp
     clock = {"now": 1000.0}
     monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
     idx = TagIndex(ttl_seconds=120)
-    client = _make_client_with_get_tags(_sample_response())
 
-    await idx.get(client, "https://example/api", "scope-1", "Poacher Sighting")
+    await idx.get(_make_client_with_get_tags(_sample_response(), scope="scope-1"), "Poacher Sighting")
     clock["now"] += 121
-    await idx.get(client, "https://example/api", "scope-2", "Poacher Sighting")
+    await idx.get(_make_client_with_get_tags(_sample_response(), scope="scope-2"), "Poacher Sighting")
 
     assert set(idx._cache) == {("https://example/api", "scope-2")}
     assert set(idx._locks) == {("https://example/api", "scope-2")}
@@ -472,18 +480,19 @@ async def test_tag_index_eviction_keeps_a_lock_that_is_held(monkeypatch):
 
     slow_client = MagicMock()
     slow_client.get_tags = AsyncMock(side_effect=slow_get_tags)
+    slow_client.base_url, slow_client.cache_scope = "https://example/api", "scope-1"
     release.set()
-    await idx.get(slow_client, "https://example/api", "scope-1", "Poacher Sighting")
+    await idx.get(slow_client, "Poacher Sighting")
     release.clear()
     started.clear()
     clock["now"] += 121  # scope-1 is stale; the refresh below holds its lock
     refresh = asyncio.create_task(
-        idx.get(slow_client, "https://example/api", "scope-1", "Poacher Sighting")
+        idx.get(slow_client, "Poacher Sighting")
     )
     await asyncio.wait_for(started.wait(), 1)
 
-    fast_client = _make_client_with_get_tags(_sample_response())
-    await idx.get(fast_client, "https://example/api", "scope-2", "Poacher Sighting")
+    fast_client = _make_client_with_get_tags(_sample_response(), scope="scope-2")
+    await idx.get(fast_client, "Poacher Sighting")
 
     assert ("https://example/api", "scope-1") in idx._locks
     release.set()
@@ -502,25 +511,29 @@ async def test_tag_index_evicts_the_lock_of_a_scope_whose_fetch_failed(monkeypat
     idx = TagIndex(ttl_seconds=120)
     failing = MagicMock()
     failing.get_tags = AsyncMock(side_effect=RuntimeError("401"))
+    failing.base_url, failing.cache_scope = "https://example/api", "bad-token"
     with pytest.raises(RuntimeError):
-        await idx.get(failing, "https://example/api", "bad-token", "Poacher Sighting")
+        await idx.get(failing, "Poacher Sighting")
     assert ("https://example/api", "bad-token") in idx._locks
 
-    await idx.get(
-        _make_client_with_get_tags(_sample_response()), "https://example/api", "scope-2", "Poacher Sighting"
-    )
+    await idx.get(_make_client_with_get_tags(_sample_response(), scope="scope-2"), "Poacher Sighting")
 
     assert set(idx._locks) == {("https://example/api", "scope-2")}
 
 
 def test_tag_index_peek_reports_a_fresh_entry_without_a_client(monkeypatch):
+    """peek takes the token, not a scope: the key has one owner (the client
+    module), so a hit and a miss can never compute it differently."""
     import app.datasource.tag_index as tag_index_module
+    from app.datasource.client import cache_scope_for_token
 
     clock = {"now": 1000.0}
     monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
     idx = TagIndex(ttl_seconds=120)
-    assert idx.peek("https://example/api", "scope-1") is None
-    idx._cache[("https://example/api", "scope-1")] = (_build_index(_sample_response()), clock["now"])
-    assert idx.peek("https://example/api", "scope-1") is not None
+    key = ("https://example/api", cache_scope_for_token("abc"))
+    assert idx.peek("https://example/api", "abc") is None
+    idx._cache[key] = (_build_index(_sample_response()), clock["now"])
+    assert idx.peek("https://example/api", "abc") is not None
+    assert idx.peek("https://example/api", "Token abc") is not None
     clock["now"] += 121
-    assert idx.peek("https://example/api", "scope-1") is None
+    assert idx.peek("https://example/api", "abc") is None

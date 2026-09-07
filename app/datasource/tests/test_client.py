@@ -96,3 +96,22 @@ async def test_post_event_once_does_not_retry():
 
     assert client._client.post.await_count == 1
     await client._client.aclose()
+
+
+def test_client_carries_its_cache_key():
+    """TagIndex keys its cache by the client's base_url and a digest of its
+    token, so the client that fetched the tags is the only source of the key."""
+    from app.datasource.client import CmoreClient, cache_scope_for_token
+
+    client = CmoreClient(base_url="https://cmore.test/api", token="abc")
+
+    assert client.base_url == "https://cmore.test/api"
+    assert client.cache_scope == cache_scope_for_token("abc")
+    assert "abc" not in client.cache_scope
+
+
+def test_cache_scope_ignores_the_token_prefix_the_client_also_strips():
+    from app.datasource.client import cache_scope_for_token
+
+    assert cache_scope_for_token("Token abc") == cache_scope_for_token("abc") == cache_scope_for_token(" abc ")
+    assert cache_scope_for_token("abc") != cache_scope_for_token("abd")

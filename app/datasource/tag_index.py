@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .client import CmoreClient
+from .client import CmoreClient, cache_scope_for_token
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +130,23 @@ def _build_index(raw_response: list) -> TagIndexData:
 
 
 class TagIndex:
-    """Lazy, per-(base_url, scope) cache of the CMORE tag schema.
+    """Lazy cache of the CMORE tag schema, keyed by the fetching client's
+    (base_url, cache_scope), where cache_scope is a digest of its token.
 
     CMORE scopes tag visibility by ShareGroup, which is bound to the token.
-    Two Gundi integrations pointing at the same CMORE instance with different
-    tokens see different tag sets — so the cache MUST be keyed by a scope
-    that separates them, not just base_url, otherwise one integration's empty
-    view poisons the other's resolution. The delivery path passes the
-    integration id as the scope (one token per saved integration); the
-    reference path passes a digest of the token itself, because the portal's
-    draft runs carry no stable integration id.
+    Two tokens against the same CMORE instance see different tag sets, so
+    the key must separate them; and a rotated token must get a fresh entry
+    rather than the old token's view. Deriving the key from the client that
+    does the fetch (CmoreClient.base_url / .cache_scope) makes it impossible
+    for the key and the credentials to disagree. Two saved integrations
+    that share a token and base_url share one entry, which is correct: they
+    see the same tags. peek() takes the base_url and token for callers that
+    want to answer a hit without opening a client; it derives the scope the
+    same way the client does, so the key has one owner.
+
+    With ttl_seconds=None (the delivery singleton) entries live for the
+    process; a rotation leaves the old token's entry resident until restart,
+    which is bounded by how often tokens rotate.
     """
 
     def __init__(self, ttl_seconds: Optional[float] = None) -> None:
@@ -157,27 +164,18 @@ class TagIndex:
         # there is no await between the lookup and the insert.
         self._locks: Dict[tuple, asyncio.Lock] = {}
 
-    async def get(
-        self,
-        client: CmoreClient,
-        base_url: str,
-        scope: str,
-        tag_ref: str,
-    ) -> Optional[TagInfo]:
-        """Resolve a tag by id or name within one scope's CMORE view."""
-        index = await self._ensure_loaded(client, base_url, scope)
+    async def get(self, client: CmoreClient, tag_ref: str) -> Optional[TagInfo]:
+        """Resolve a tag by id or name within the client's CMORE view."""
+        index = await self._ensure_loaded(client)
         return index.resolve(tag_ref)
 
-    async def get_index(
-        self, client: CmoreClient, base_url: str, scope: str
-    ) -> TagIndexData:
+    async def get_index(self, client: CmoreClient) -> TagIndexData:
         """The full (cached) index — for callers that enumerate tags/fields
         (reference actions) rather than resolving one ref."""
-        return await self._ensure_loaded(client, base_url, scope)
+        return await self._ensure_loaded(client)
 
-    async def _ensure_loaded(
-        self, client: CmoreClient, base_url: str, scope: str
-    ) -> TagIndexData:
+    async def _ensure_loaded(self, client: CmoreClient) -> TagIndexData:
+        base_url, scope = client.base_url, client.cache_scope
         key = (base_url, scope)
         cached = self._get_fresh(key)
         if cached is not None:
@@ -201,10 +199,11 @@ class TagIndex:
             self._cache[key] = (index, _now())
             return index
 
-    def peek(self, base_url: str, scope: str) -> Optional[TagIndexData]:
-        """The cached index if it is fresh, else None. Lets a caller skip
-        opening a client on a hit; a miss still goes through get_index."""
-        return self._get_fresh((base_url, scope))
+    def peek(self, base_url: str, token: Optional[str]) -> Optional[TagIndexData]:
+        """The cached index for (base_url, token) if it is fresh, else None.
+        Lets a caller skip opening a client on a hit; a miss still goes
+        through get_index with a client built from the same values."""
+        return self._get_fresh((base_url, cache_scope_for_token(token)))
 
     def _evict_expired(self) -> None:
         """Drop expired entries and idle locks that no longer guard a fresh

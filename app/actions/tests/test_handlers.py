@@ -182,6 +182,23 @@ def metadata():
     return {"gundi_id": str(uuid.uuid4())}
 
 
+def _client_cls_yielding(instance):
+    """A CmoreClient stand-in: `async with CmoreClient(base_url=, token=)`
+    yields `instance`, carrying the base_url and cache_scope the real client
+    derives from those arguments (TagIndex keys its cache by them)."""
+    from app.datasource.client import cache_scope_for_token
+
+    def construct(base_url, token=None, **kwargs):
+        instance.base_url = base_url
+        instance.cache_scope = cache_scope_for_token(token)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=instance)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    return MagicMock(side_effect=construct)
+
+
 def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=None, post_comment_return=None):
     """Patch the CmoreClient async-context-manager and capture method calls."""
     inner = MagicMock()
@@ -195,10 +212,7 @@ def _patch_cmore_client(mocker, post_locations_return=None, post_event_return=No
         return_value=[MagicMock(clientId=8888, error=None)]
     )
 
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=inner)
-    cm.__aexit__ = AsyncMock(return_value=None)
-    mocker.patch("app.actions.handlers.CmoreClient", return_value=cm)
+    mocker.patch("app.actions.handlers.CmoreClient", _client_cls_yielding(inner))
     return inner
 
 
@@ -1372,9 +1386,7 @@ def _mock_cmore_client_cls(mocker, instance):
     """Patch handlers.CmoreClient so `async with CmoreClient(...)` yields ``instance``."""
     from app.actions import handlers as handlers_module
 
-    client_cls = MagicMock()
-    client_cls.return_value.__aenter__ = AsyncMock(return_value=instance)
-    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    client_cls = _client_cls_yielding(instance)
     mocker.patch.object(handlers_module, "CmoreClient", client_cls)
     return client_cls
 
@@ -1427,3 +1439,54 @@ async def test_action_auth_reports_invalid_credentials_on_error(mocker, integrat
 
     assert result["valid_credentials"] is False
     assert "401" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_action_auth_on_a_draft_lets_the_failure_reach_the_runner(mocker, integration):
+    """The portal reads any 200 {valid_credentials: false} as "invalid
+    credentials", so a 404 from a wrong path would send the user at the token.
+    On a draft the failure propagates and the runner classifies it (401 and
+    403 stay "invalid", the rest "error") with its own redaction; the 200
+    result is kept for saved integrations, whose reader expects it."""
+    import httpx
+
+    from app.actions.configurations import AuthenticateConfig
+    from app.actions.handlers import action_auth
+    from app.services.activity_logger import ephemeral_run
+
+    request = httpx.Request("GET", "https://cmore.test/v2/clients/virtual/gateway_mapping")
+    instance = MagicMock()
+    instance.get_gateway_mapping = AsyncMock(
+        side_effect=httpx.HTTPStatusError("404", request=request, response=httpx.Response(404, request=request))
+    )
+    _mock_cmore_client_cls(mocker, instance)
+    config = AuthenticateConfig(token="t", base_url="https://cmore.test", owner_group_id=1)
+
+    token = ephemeral_run.set(True)
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            await action_auth(integration, config)
+    finally:
+        ephemeral_run.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_deliver_resolves_tags_through_the_client_that_fetches_them(
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
+):
+    """TagIndex keys its cache by the client's own base_url and token digest,
+    so deliver hands it the client and nothing else: the cache key cannot
+    disagree with the credentials the fetch used (a rotated token gets a
+    fresh entry instead of the old token's tag view)."""
+    from app.actions import handlers as handlers_module
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    get = mocker.patch.object(handlers_module.tag_index, "get", AsyncMock(return_value=fake_tag_info))
+
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    get.assert_awaited_once_with(inner, deliver_config.event_type_to_tag[0].tag)
