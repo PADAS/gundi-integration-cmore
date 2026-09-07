@@ -200,11 +200,12 @@ on, the **API Base URL** of a draft auth config must be `https` and resolve
 only to public addresses; if `EPHEMERAL_BASE_URL_ALLOWLIST` is set as well,
 the hostname must additionally be on that list (the allowlist narrows, it
 does not exempt). Otherwise the reference actions and the credential test
-refuse it with the policy's own text, for example `API Base URL scheme 'http'
-is not allowed; only 'https' is permitted.` or `API Base URL resolves to a
-private or reserved address (10.0.0.5), which is blocked to prevent SSRF.`
-Saved integrations are not re-checked, and a cached tag list is served
-without re-running the check.
+refuse it with `Invalid configuration — ` followed by the policy's own text,
+for example `API Base URL scheme 'http' is not allowed; only 'https' is
+permitted.` or `API Base URL resolves to a private or reserved address
+(10.0.0.5), which is blocked to prevent SSRF.` Saved integrations are not
+re-checked, and a cached tag list is served without re-running the check (a
+hit makes no outbound request).
 
 ### Multiple EarthRanger providers on one CMORE destination
 

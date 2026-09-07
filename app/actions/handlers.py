@@ -15,7 +15,7 @@ from gundi_core.events import GundiDelivery
 from gundi_core.schemas.v2 import Integration, LogLevel
 from gundi_client_v2.transformations import apply_transformations
 
-from app.datasource.client import CmoreClient, cache_scope_for_token
+from app.datasource.client import CmoreClient
 from app.datasource.schemas import (
     CmoreClassification,
     CmoreComment,
@@ -30,9 +30,7 @@ from app.datasource.schemas import (
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
 from app import settings
 from app.services.activity_logger import activity_logger, ephemeral_run, log_action_activity
-from app.services.errors import (
-    IntegrationConfigurationError, classify_error, format_classified_error, source_status_code,
-)
+from app.services.errors import IntegrationConfigurationError
 from app.services.url_policy import validate_outbound_url
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
@@ -76,10 +74,12 @@ async def _check_draft_api_base_url(base_url: str) -> None:
             base_url, allowlist=settings.EPHEMERAL_BASE_URL_ALLOWLIST, what="API Base URL",
         )
     except ValueError as e:
-        # Runner-authored text, forwarded as the template's own guard forwards
-        # it: it names the scheme, the host and the resolved address, never
-        # the URL's userinfo, path or query, and it tells the user what to
-        # change ("only 'https' is permitted", "resolves to a private ...").
+        # Runner-authored text with the same content the template's own guard
+        # surfaces for integration.base_url: it names the scheme, the host and
+        # the resolved address, never the URL's userinfo, path or query, and
+        # tells the user what to change ("only 'https' is permitted",
+        # "resolves to a private ..."). The runner shows it as
+        # "Invalid configuration — <text>" (422).
         raise IntegrationConfigurationError(str(e)) from None
 
 
@@ -112,29 +112,17 @@ async def action_auth(integration: Integration, action_config: AuthenticateConfi
             # (DFFE) — past the portal's patience for "test credentials". Tag
             # visibility is covered by the validate CLI and reference actions.
             await client.get_gateway_mapping()
-    except IntegrationConfigurationError:
-        # The draft URL policy refusing the API Base URL: a 422 with the
-        # policy's text, as for the reference actions, not a failed login.
-        raise
     except Exception as e:
-        return {"valid_credentials": False, "error": _auth_error_text(e)}
+        if ephemeral_run.get():
+            # The portal reads any 200 {valid_credentials: false} as "invalid
+            # credentials", which misdirects a 404 (wrong path) or an outage
+            # at the token. On a draft, let the runner classify and redact
+            # the failure instead: 401/403 still read as invalid, the policy
+            # refusal as a 422, everything else as an error.
+            raise
+        # Saved integrations keep the 200 result their reader expects.
+        return {"valid_credentials": False, "error": f"{type(e).__name__}: {e}"}
     return {"valid_credentials": True}
-
-
-def _auth_error_text(exc: Exception) -> str:
-    """The error a failed credential test reports. It travels inside a 200
-    result, so the runner's draft redaction never sees it: on a draft, use the
-    classified title and status only (str(exc) carries the request URL and can
-    carry a response body); a saved integration keeps the verbose text."""
-    if not ephemeral_run.get():
-        return f"{type(exc).__name__}: {exc}"
-    classified = classify_error(exc)
-    if classified is None:
-        # A 404 (server root instead of /za/WebAPI/api) is unclassified but
-        # the status is the whole signal; it is an int, so it can be shown.
-        status = source_status_code(exc)
-        return f"{type(exc).__name__} (HTTP {status})" if status else type(exc).__name__
-    return format_classified_error(classified, include_message=False)
 
 
 # Short-TTL tag cache for reference actions (config-time UX). Separate from
@@ -156,9 +144,10 @@ async def _fetch_tag_index(integration: Integration) -> TagIndexData:
     token = auth.token.get_secret_value()
     # A hit is the common case in the dropdown cascade; do not build an httpx
     # client (synchronous SSL setup), or run the draft URL policy's DNS
-    # resolution, for a call that sends nothing. The entry passed the policy
-    # when it was fetched.
-    cached = reference_tag_index.peek(auth.base_url, cache_scope_for_token(token))
+    # resolution, for a call that sends no request: the policy guards
+    # outbound connections, and a hit makes none. (The entry may have been
+    # filled by a saved integration with the same token, off the draft path.)
+    cached = reference_tag_index.peek(auth.base_url, token)
     if cached is not None:
         return cached
     async with _cmore_client(auth.base_url, token) as client:

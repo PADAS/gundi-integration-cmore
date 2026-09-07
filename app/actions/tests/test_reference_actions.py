@@ -8,7 +8,7 @@ from gundi_core.schemas.v2 import Integration
 
 from app.actions.configurations import ListTagNamesQuery
 from app.actions.handlers import action_list_tag_names
-from app.actions.tests.test_handlers import _integration_dict
+from app.actions.tests.test_handlers import _client_cls_yielding, _integration_dict
 from app.services.errors import IntegrationConfigurationError
 
 
@@ -85,23 +85,6 @@ def mock_cmore_client(mocker):
     instance.get_gateway_mapping = AsyncMock(return_value=[])
     mocker.patch.object(handlers_module, "CmoreClient", _client_cls_yielding(instance))
     return instance
-
-
-def _client_cls_yielding(instance):
-    """A CmoreClient stand-in: `async with CmoreClient(base_url=, token=)`
-    yields `instance`, carrying the base_url and cache_scope the real client
-    would derive from those arguments (TagIndex reads them)."""
-    from app.datasource.client import cache_scope_for_token
-
-    def construct(base_url, token=None, **kwargs):
-        instance.base_url = base_url
-        instance.cache_scope = cache_scope_for_token(token or "")
-        cm = MagicMock()
-        cm.__aenter__ = AsyncMock(return_value=instance)
-        cm.__aexit__ = AsyncMock(return_value=False)
-        return cm
-
-    return MagicMock(side_effect=construct)
 
 
 @pytest.mark.asyncio

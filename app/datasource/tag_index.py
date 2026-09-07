@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .client import CmoreClient
+from .client import CmoreClient, cache_scope_for_token
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +140,9 @@ class TagIndex:
     does the fetch (CmoreClient.base_url / .cache_scope) makes it impossible
     for the key and the credentials to disagree. Two saved integrations
     that share a token and base_url share one entry, which is correct: they
-    see the same tags. peek() takes the key parts explicitly for callers that
-    want to answer a hit without opening a client.
+    see the same tags. peek() takes the base_url and token for callers that
+    want to answer a hit without opening a client; it derives the scope the
+    same way the client does, so the key has one owner.
 
     With ttl_seconds=None (the delivery singleton) entries live for the
     process; a rotation leaves the old token's entry resident until restart,
@@ -198,10 +199,11 @@ class TagIndex:
             self._cache[key] = (index, _now())
             return index
 
-    def peek(self, base_url: str, scope: str) -> Optional[TagIndexData]:
-        """The cached index if it is fresh, else None. Lets a caller skip
-        opening a client on a hit; a miss still goes through get_index."""
-        return self._get_fresh((base_url, scope))
+    def peek(self, base_url: str, token: Optional[str]) -> Optional[TagIndexData]:
+        """The cached index for (base_url, token) if it is fresh, else None.
+        Lets a caller skip opening a client on a hit; a miss still goes
+        through get_index with a client built from the same values."""
+        return self._get_fresh((base_url, cache_scope_for_token(token)))
 
     def _evict_expired(self) -> None:
         """Drop expired entries and idle locks that no longer guard a fresh

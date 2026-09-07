@@ -522,13 +522,18 @@ async def test_tag_index_evicts_the_lock_of_a_scope_whose_fetch_failed(monkeypat
 
 
 def test_tag_index_peek_reports_a_fresh_entry_without_a_client(monkeypatch):
+    """peek takes the token, not a scope: the key has one owner (the client
+    module), so a hit and a miss can never compute it differently."""
     import app.datasource.tag_index as tag_index_module
+    from app.datasource.client import cache_scope_for_token
 
     clock = {"now": 1000.0}
     monkeypatch.setattr(tag_index_module, "_now", lambda: clock["now"])
     idx = TagIndex(ttl_seconds=120)
-    assert idx.peek("https://example/api", "scope-1") is None
-    idx._cache[("https://example/api", "scope-1")] = (_build_index(_sample_response()), clock["now"])
-    assert idx.peek("https://example/api", "scope-1") is not None
+    key = ("https://example/api", cache_scope_for_token("abc"))
+    assert idx.peek("https://example/api", "abc") is None
+    idx._cache[key] = (_build_index(_sample_response()), clock["now"])
+    assert idx.peek("https://example/api", "abc") is not None
+    assert idx.peek("https://example/api", "Token abc") is not None
     clock["now"] += 121
-    assert idx.peek("https://example/api", "scope-1") is None
+    assert idx.peek("https://example/api", "abc") is None
