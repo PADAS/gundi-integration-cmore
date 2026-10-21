@@ -297,26 +297,97 @@ async def test_event_with_missing_tag_still_posts(
 
 
 @pytest.mark.asyncio
-async def test_event_with_unmapped_event_type_posts_without_tag(
+async def test_event_with_unmapped_event_type_is_skipped_and_logged(
     mocker, integration, deliver_config, provider_info, event, metadata
 ):
-    """event_type is not in event_type_to_tag — no tag attached, no tag_index call."""
+    """event_type is not in event_type_to_tag — nothing is posted to CMORE and
+    a WARNING activity-log entry names the event type (GUNDI guardrail: an
+    unmapped event must not flow into CMORE untagged)."""
+    from app.actions.handlers import action_deliver
+    from gundi_core.schemas.v2 import LogLevel
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    activity_log = _patch_activity_logger(mocker)
+    tag_mock = mocker.patch("app.actions.handlers.tag_index.get")
+
+    event.event_type = "unconfigured_event_type"
+    event.provider_metadata = {"serial_number": 324}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_not_awaited()
+    inner.post_comment.assert_not_awaited()
+    tag_mock.assert_not_called()
+    assert result["dropped"] is True
+    assert result["reason"] == "event_type_not_mapped"
+
+    activity_log.assert_awaited_once()
+    log_kwargs = activity_log.call_args.kwargs
+    assert log_kwargs["level"] == LogLevel.WARNING
+    assert "unconfigured_event_type" in log_kwargs["title"]
+    assert log_kwargs["data"]["event_type"] == "unconfigured_event_type"
+    assert log_kwargs["data"]["serial_number"] == 324
+    assert log_kwargs["data"]["configured_event_types"] == ["lion_sighting"]
+
+
+@pytest.mark.asyncio
+async def test_event_with_no_mappings_configured_is_skipped_and_logged(
+    mocker, integration, provider_info, event, metadata
+):
+    """An empty / absent event_type_to_tag list means nothing is configured —
+    every event is skipped and logged, not posted untagged."""
+    from app.actions.configurations import DeliverConfig
+    from app.actions.handlers import action_deliver
+    from gundi_core.schemas.v2 import LogLevel
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    activity_log = _patch_activity_logger(mocker)
+
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(
+        integration, DeliverConfig(event_type_to_tag=None), delivery, metadata
+    )
+
+    inner.post_event.assert_not_awaited()
+    assert result["dropped"] is True
+    assert result["reason"] == "event_type_not_mapped"
+    activity_log.assert_awaited_once()
+    log_kwargs = activity_log.call_args.kwargs
+    assert log_kwargs["level"] == LogLevel.WARNING
+    assert log_kwargs["data"]["configured_event_types"] == []
+
+
+@pytest.mark.asyncio
+async def test_event_with_tag_mapping_but_no_field_mappings_still_posts(
+    mocker, integration, provider_info, event, metadata, fake_tag_info
+):
+    """A tag entry with an empty field_mappings list still counts as configured:
+    the event posts with the tag attached and no field values."""
+    from app.actions.configurations import CmoreTagMapping, DeliverConfig
     from app.actions.handlers import action_deliver
 
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
-    _patch_activity_logger(mocker)
-    tag_mock = mocker.patch("app.actions.handlers.tag_index.get")
+    activity_log = _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
 
-    event.event_type = "unconfigured_event_type"
+    config = DeliverConfig(
+        event_type_to_tag=[
+            CmoreTagMapping(event_type="lion_sighting", tag="Wildlife Sighting", field_mappings=[]),
+        ]
+    )
     delivery = GundiDelivery(payload=event, provider=provider_info)
-    result = await action_deliver(integration, deliver_config, delivery, metadata)
+    result = await action_deliver(integration, config, delivery, metadata)
 
     inner.post_event.assert_awaited_once()
     posted = inner.post_event.await_args[0][0]
-    assert posted.tags is None
-    tag_mock.assert_not_called()
+    assert posted.tags is not None
+    assert posted.tags[0].tagId == 42
+    assert posted.tags[0].values == []
     assert result["event_posted"] is True
+    activity_log.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -718,13 +789,14 @@ async def test_deliver_event_records_mapping_for_followup_updates(
     inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
     state = _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         gundi_id="gid-new",
         source_id=uuid.uuid4(),
         external_source_id="er-uuid-new",
         recorded_at=datetime.now(tz=timezone.utc),
-        event_type="poacher_sighting_rep",
+        event_type="lion_sighting",
         title="A sighting",
         location=Location(lat=0.0, lon=0.0),
     )
@@ -755,6 +827,7 @@ async def test_two_events_same_source_get_distinct_mappings(
     inner.post_event = AsyncMock(side_effect=[{"messageId": 111}, {"messageId": 222}])
     state = _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     def _event(gundi_id):
         return Event(
@@ -762,7 +835,7 @@ async def test_two_events_same_source_get_distinct_mappings(
             source_id=uuid.uuid4(),
             external_source_id="rhino_carcass",  # SAME source for both events
             recorded_at=datetime.now(tz=timezone.utc),
-            event_type="rhino_carcass",
+            event_type="lion_sighting",
             title="Rhino Carcass",
             location=Location(lat=0.0, lon=0.0),
         )
@@ -1182,11 +1255,13 @@ async def test_deliver_event_keeps_deep_link_out_of_cmore_post_description(
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Coyote Carcass",
         location=Location(lat=0.0, lon=0.0),
         provider_metadata={
@@ -1214,11 +1289,13 @@ async def test_deliver_event_also_posts_deep_link_as_comment(
     inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Coyote Carcass",
         location=Location(lat=0.0, lon=0.0),
         provider_metadata={
@@ -1258,11 +1335,13 @@ async def test_deliver_event_comment_includes_serial_and_deep_link(
     inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Rhino Carcass",
         location=Location(lat=0.0, lon=0.0),
         provider_metadata={
@@ -1293,11 +1372,13 @@ async def test_deliver_event_comment_serial_only_when_no_deep_link(
     inner = _patch_cmore_client(mocker, post_event_return={"messageId": 99999})
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Rhino Carcass",
         location=Location(lat=0.0, lon=0.0),
         provider_metadata={"serial_number": 267},
@@ -1321,11 +1402,13 @@ async def test_deliver_event_skips_deep_link_comment_when_no_url(
     inner = _patch_cmore_client(mocker)
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Coyote Carcass",
         location=Location(lat=0.0, lon=0.0),
     )
@@ -1347,11 +1430,13 @@ async def test_deliver_event_skips_deep_link_comment_when_no_message_id(
     inner = _patch_cmore_client(mocker, post_event_return={"status": "ok-but-weird"})
     _patch_state_manager(mocker)
     _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=None)
 
     e = Event(
         source_id=uuid.uuid4(),
         external_source_id="er-uuid",
         recorded_at=datetime.now(tz=timezone.utc),
+        event_type="lion_sighting",
         title="Coyote Carcass",
         location=Location(lat=0.0, lon=0.0),
         provider_metadata={

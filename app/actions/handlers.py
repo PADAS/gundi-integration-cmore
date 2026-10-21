@@ -652,29 +652,34 @@ async def _push_event(
             None,
         )
 
-    if action_config.event_type_to_tag is None:
-        logger.info(
-            "DeliverConfig.event_type_to_tag is None; posting event (event_type=%r) "
-            "with no tag.",
-            event.event_type,
+    if mapping is None:
+        # Guardrail: an event whose type has no "Event type → CMORE tag" entry
+        # (or when no entries are configured at all) is NOT posted. Posting it
+        # untagged let historical and unexpected events flood CMORE before any
+        # mapping was set up; the skip is surfaced in the activity log instead.
+        configured = [m.event_type for m in (action_config.event_type_to_tag or [])]
+        serial = _get_serial_number(event)
+        await log_action_activity(
+            integration_id=str(integration.id),
+            action_id="deliver",
+            title=f"No CMORE tag mapping for event type {event.event_type!r} — skipping event",
+            level=LogLevel.WARNING,
+            data={
+                "event_type": event.event_type,
+                "serial_number": serial,
+                "gundi_id": str(event.gundi_id) if event.gundi_id else None,
+                "configured_event_types": configured,
+            },
         )
-    elif mapping is None:
-        known = [m.event_type for m in action_config.event_type_to_tag]
-        logger.info(
-            "No event_type_to_tag mapping for event_type=%r; posting event with "
-            "no tag. Known event_types: %s",
-            event.event_type,
-            known,
-        )
+        return {"dropped": True, "reason": "event_type_not_mapped"}
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None
-        if mapping is not None:
-            tag = await _build_event_tag(
-                client, auth.base_url, str(integration.id), mapping, event
-            )
-            if tag is not None:
-                tags = [tag]
+        tag = await _build_event_tag(
+            client, auth.base_url, str(integration.id), mapping, event
+        )
+        if tag is not None:
+            tags = [tag]
 
         location = event.location
         cmore_event = CmoreEvent(

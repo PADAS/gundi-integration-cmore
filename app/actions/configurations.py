@@ -246,10 +246,10 @@ class DeliverConfig(PushActionConfiguration):
         None,
         title="Event type → CMORE tag",
         description=(
-            "Optional list of mappings from Gundi event_type to a CMORE tag + "
-            "field mappings. Events whose event_type is not in this list are "
-            "still posted to CMORE with description + location, but without a "
-            "structured tag attached."
+            "Mappings from Gundi event_type to a CMORE tag + field mappings. "
+            "Only events whose event_type is in this list are sent to CMORE; "
+            "any other event is skipped and recorded in the activity log. "
+            "A tag entry with no field mappings still counts as configured."
         ),
     )
     default_affiliation: Affiliation = FieldWithUIOptions(

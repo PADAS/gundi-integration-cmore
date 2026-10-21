@@ -59,14 +59,20 @@ live under the single Deliver config.
 
 ### Event type → CMORE tag (`event_type_to_tag`)
 
-Optional list mapping each Gundi `event_type` to a CMORE tag and its fields.
-Events whose type isn't listed still post (description + location + deep-link
-comment) but **without** a structured tag.
+List mapping each Gundi `event_type` to a CMORE tag and its fields. **Only
+event types in this list are sent to CMORE.** An event whose type isn't listed
+(or any event, while the list is empty) is skipped and recorded in the
+connection's activity log as a warning — *No CMORE tag mapping for event type
+'…' — skipping event* — with the event type, EarthRanger serial number and the
+list of configured types. A tag entry with no field mappings still counts as
+configured: the event posts with the tag attached and no field values.
 
-> **Impact of an unmapped type:** untagged events show on the map but are
-> excluded from everything that relies on classification — tag-based
-> filtering and lookups, analytics, reporting, dashboards, and rule-based
-> workflows.
+> **Why skip rather than post untagged:** a connection with no mappings yet
+> used to forward every routed event untagged, which flooded CMORE with
+> historical and unexpected events that then had to be cleaned up by hand.
+> Untagged events are also invisible to everything that relies on
+> classification — tag-based filtering and lookups, analytics, reporting,
+> dashboards and rule-based workflows — so there is little value in them.
 
 Each entry (**CmoreTagMapping**):
 

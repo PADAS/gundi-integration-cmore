@@ -28,11 +28,10 @@ event still posts (description + location) but the tag is dropped.
   ```
   Zero tags (or the domain missing) → a **CMORE admin must subscribe the
   ShareGroup to the tag domain**. The API can't do this; it's portal-admin only.
-- Also confirm the configured **CMORE Tag** ref resolves, and that an
-  `event_type_to_tag` entry exists for the event's `event_type` (an unmapped
-  type posts with no tag by design — note that untagged events are excluded
-  from CMORE's tag-based filtering, analytics, reporting, dashboards, and
-  rule-based workflows). Two ways a ref stops resolving:
+- Also confirm the configured **CMORE Tag** ref resolves (an event type with
+  no `event_type_to_tag` entry at all is never posted — see
+  [An event is skipped as unmapped](#an-event-is-skipped-as-unmapped)). Two
+  ways a ref stops resolving:
   - **ID-based ref** (`"tag": "8443"`): the ID doesn't exist on this instance
     — typo, or the config was copied from a different CMORE instance (IDs are
     instance-specific).
@@ -51,6 +50,27 @@ The source value didn't resolve to a valid CMORE option. Add a **value mapping**
 [Configuration → value resolution](configuration.md#how-field-values-are-resolved).
 The [`scaffold-mapping`](configuration.md#scaffolding-mappings-cli-alternative) tool surfaces
 these to fill in.
+
+## An event is skipped as unmapped
+
+Activity log entry (Gundi portal → the CMORE connection → Activity), at
+`WARNING`:
+
+```
+No CMORE tag mapping for event type 'poacher_sighting_rep' — skipping event
+```
+
+The event's `event_type` has no entry under **Event type → CMORE tag**, or the
+list is empty. Only mapped event types are sent to CMORE; everything else is
+dropped here on purpose so an unconfigured connection can't flood CMORE with
+untagged events. The entry's data carries `event_type`, `serial_number`,
+`gundi_id` and `configured_event_types`.
+
+- Expected? Nothing to do — this is also how to keep an event type out of
+  CMORE without touching the EarthRanger-side share filter.
+- Not expected? Add an entry for that `event_type` (a tag with no field
+  mappings is enough to let it through), then re-send the event from
+  EarthRanger; the skipped event is not retried.
 
 ## Nothing reaches the runner at all
 
