@@ -94,10 +94,13 @@ def _index():
     return _build_index(RAW_TAGS)
 
 
-def test_check_tag_mappings_skips_without_deliver_config():
+def test_check_tag_mappings_warns_without_deliver_config():
+    """An empty mapping list means the runner delivers no events at all, so
+    the check must not read as a harmless skip."""
     results = check_tag_mappings(_index(), {})
     assert len(results) == 1
-    assert results[0].status == CheckStatus.SKIP
+    assert results[0].status == CheckStatus.WARN
+    assert "no events will be delivered" in results[0].detail
 
 
 def test_check_tag_mappings_passes_when_everything_resolves():

@@ -160,8 +160,11 @@ def check_tag_mappings(index, deliver_data: Optional[dict]) -> List[CheckResult]
         return [
             CheckResult(
                 name="tag_mappings",
-                status=CheckStatus.SKIP,
-                detail="No event_type_to_tag mappings configured; nothing to resolve.",
+                status=CheckStatus.WARN,
+                detail=(
+                    "No event_type_to_tag mappings configured; no events will be "
+                    "delivered to CMORE until at least one event type is mapped."
+                ),
             )
         ]
 
