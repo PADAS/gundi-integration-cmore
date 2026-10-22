@@ -378,7 +378,7 @@ report is shared automatically. To share more event types, repeat Part 2.3
 |---|---|---|
 | Event arrives in CMORE but **without the tag** | Tag name misspelled in the mapping, or your share group can't see the tag's domain | [Events post, but the structured tag is missing](troubleshooting.md#events-post-but-the-structured-tag-is-missing) |
 | Tag is there but **one field is empty** | That value needs a Value Mapping (Part 2.3, step 4) | [A specific lookup value is dropped](troubleshooting.md#a-specific-lookup-value-is-dropped) |
-| **Nothing arrives** in CMORE at all | Event type not in the ER share filter, or routing/credentials problem | [Nothing reaches the runner at all](troubleshooting.md#nothing-reaches-the-runner-at-all) |
+| **Nothing arrives** in CMORE at all | **Event type → CMORE tag** list is empty (every event is skipped), event type not in the ER share filter, or routing/credentials problem | [An event is skipped as unmapped](troubleshooting.md#an-event-is-skipped-as-unmapped), then [Nothing reaches the runner at all](troubleshooting.md#nothing-reaches-the-runner-at-all) |
 | **One event type never arrives**, activity log shows *skipping event* | No **Event type → CMORE tag** entry for that type (Part 2.3) | [An event is skipped as unmapped](troubleshooting.md#an-event-is-skipped-as-unmapped) |
 | **Test Connection fails** | Wrong token, wrong base URL (must end in `/za/WebAPI/api`), or service not Active / not linked to your group (Part 1.3) | re-run Part 1.2–1.3, then Test Connection again |
 | **No link back to EarthRanger** on the event | Deep-link comment issue | [The source deep link doesn't appear in CMORE](troubleshooting.md#the-source-deep-link-doesnt-appear-in-cmore) |
