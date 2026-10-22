@@ -353,9 +353,12 @@ Time to prove the pipeline end-to-end.
    event's EarthRanger title.
 4. Click it. The Event Detail window shows:
    - the **description and location** from EarthRanger,
-   - the **Rhino Carcass tag** with the mapped fields filled in,
+   - the **Rhino Carcass tag** with the mapped fields filled in — including
+     **Reported by**, set to the EarthRanger user or subject who reported
+     the event (CMORE itself lists the integration account as creator),
    - a **comment with a link back to the EarthRanger event**, so anyone in
-     CMORE can click through to the source,
+     CMORE can click through to the source (the reporter's name is added
+     here instead when the tag has no *Reported by* field),
    - source **Generated**, meaning it was posted by the integration, not
      typed by a person, and
    - if you attached a photo in EarthRanger *and* enabled **Forward Event

@@ -101,6 +101,24 @@ _push_event received: ... provider_metadata={'source_event_url': '...'}
 ```
 `provider_metadata=None` there means it was dropped upstream.
 
+## The reporter isn't shown on the CMORE event
+
+The EarthRanger reporter should appear in the tag's **Reported by** field, or
+else in the source comment (`… — Reported by: Jane Doe — …`). See
+[Who reported the event](configuration.md#who-reported-the-event). If neither
+shows it:
+
+- **The event has no reporter in EarthRanger.** Nothing is sent; CMORE shows
+  only the integration account as creator.
+- **The name never reached the runner.** Same chain as the deep link above:
+  the EarthRanger runner must be at gundi-integration-earthranger #54 or
+  later to stamp `provider_metadata.reported_by`. The `_push_event received`
+  log line shows what arrived.
+- **It landed in the comment but you expected the field.** The tag has no
+  field named *Reported by*, or the configured **Reported by field** doesn't
+  resolve (logged as `has no field … (reported_by_field)`). Set the field ID
+  explicitly in the mapping.
+
 ## Attachments don't appear in CMORE
 
 Photos/files on an ER event should arrive as **media comments** on the
