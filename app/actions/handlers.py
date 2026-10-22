@@ -659,10 +659,16 @@ async def _push_event(
         # mapping was set up; the skip is surfaced in the activity log instead.
         configured = [m.event_type for m in (action_config.event_type_to_tag or [])]
         serial = _get_serial_number(event)
+        if event.event_type:
+            title = f"No CMORE tag mapping for event type {event.event_type!r} — skipping event"
+            reason = "event_type_not_mapped"
+        else:
+            title = "Event has no event type, so it cannot be mapped to a CMORE tag — skipping event"
+            reason = "event_type_missing"
         await log_action_activity(
             integration_id=str(integration.id),
             action_id="deliver",
-            title=f"No CMORE tag mapping for event type {event.event_type!r} — skipping event",
+            title=title,
             level=LogLevel.WARNING,
             data={
                 "event_type": event.event_type,
@@ -671,7 +677,7 @@ async def _push_event(
                 "configured_event_types": configured,
             },
         )
-        return {"dropped": True, "reason": "event_type_not_mapped"}
+        return {"dropped": True, "reason": reason}
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None

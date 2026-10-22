@@ -1,5 +1,7 @@
 # Tag-ID Mapping Keys Implementation Plan
 
+> **Superseded detail (2026-10-21):** an event whose `event_type` has no `event_type_to_tag` entry is no longer posted untagged — it is skipped and recorded in the activity log (PR #40). The *unknown tag ref → post unclassified + warning* path described below is unchanged. See [configuration.md](../../configuration.md#event-type--cmore-tag-event_type_to_tag).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make CMORE tag/field mappings key on immutable numeric IDs (with names as a working fallback), so renames in CMORE can no longer break or misclassify delivered events.

@@ -360,6 +360,30 @@ async def test_event_with_no_mappings_configured_is_skipped_and_logged(
 
 
 @pytest.mark.asyncio
+async def test_event_without_event_type_is_skipped_with_missing_type_reason(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """An event with no event_type can never be mapped; the skip says so
+    instead of telling the operator to map the type 'None'."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    activity_log = _patch_activity_logger(mocker)
+
+    event.event_type = None
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_not_awaited()
+    assert result["dropped"] is True
+    assert result["reason"] == "event_type_missing"
+    log_kwargs = activity_log.call_args.kwargs
+    assert "None" not in log_kwargs["title"]
+    assert "no event type" in log_kwargs["title"]
+
+
+@pytest.mark.asyncio
 async def test_event_with_tag_mapping_but_no_field_mappings_still_posts(
     mocker, integration, provider_info, event, metadata, fake_tag_info
 ):

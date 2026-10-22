@@ -1,5 +1,7 @@
 # Tag-ID mapping keys — design
 
+> **Superseded detail (2026-10-21):** an event whose `event_type` has no `event_type_to_tag` entry is no longer posted untagged — it is skipped and recorded in the activity log (PR #40). The *unknown tag ref → post unclassified + warning* path described below is unchanged. See [configuration.md](../../configuration.md#event-type--cmore-tag-event_type_to_tag).
+
 **Date:** 2026-08-14
 **Status:** Approved (design review in chat, 2026-08-14)
 **Origin:** CSIR integration-testing feedback (2026-08-07), points 4–5: tag
