@@ -657,14 +657,20 @@ tags, events still post but the structured tag is silently dropped.</p>
 the payload type (Observation / Event / EventUpdate), so all of the following
 live under the single Deliver config.</p>
 <h3 id="event-type-cmore-tag-event_type_to_tag">Event type → CMORE tag (<code>event_type_to_tag</code>)<a class="headerlink" href="#event-type-cmore-tag-event_type_to_tag" title="Permanent link">&para;</a></h3>
-<p>Optional list mapping each Gundi <code>event_type</code> to a CMORE tag and its fields.
-Events whose type isn't listed still post (description + location + deep-link
-comment) but <strong>without</strong> a structured tag.</p>
+<p>List mapping each Gundi <code>event_type</code> to a CMORE tag and its fields. <strong>Only
+event types in this list are sent to CMORE.</strong> An event whose type isn't listed
+(or any event, while the list is empty) is skipped and recorded in the
+connection's activity log as a warning — <em>No CMORE tag mapping for event type
+'…' — skipping event</em> — with the event type, EarthRanger serial number and the
+list of configured types. A tag entry with no field mappings still counts as
+configured: the event posts with the tag attached and no field values.</p>
 <blockquote>
-<p><strong>Impact of an unmapped type:</strong> untagged events show on the map but are
-excluded from everything that relies on classification — tag-based
-filtering and lookups, analytics, reporting, dashboards, and rule-based
-workflows.</p>
+<p><strong>Why skip rather than post untagged:</strong> a connection with no mappings yet
+used to forward every routed event untagged, which flooded CMORE with
+historical and unexpected events that then had to be cleaned up by hand.
+Untagged events are also invisible to everything that relies on
+classification — tag-based filtering and lookups, analytics, reporting,
+dashboards and rule-based workflows — so there is little value in them.</p>
 </blockquote>
 <p>Each entry (<strong>CmoreTagMapping</strong>):</p>
 <ul>

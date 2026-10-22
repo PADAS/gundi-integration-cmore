@@ -833,15 +833,17 @@ Rhino Carcass tag.</p>
 </ol>
 <p><img alt="Test Connection returning Valid Credentials" src="../images/gundi-04-authenticate-run.png" /></p>
 <h3 id="23-map-the-event-type-to-a-cmore-tag">2.3 Map the event type to a CMORE tag<a class="headerlink" href="#23-map-the-event-type-to-a-cmore-tag" title="Permanent link">&para;</a></h3>
-<p>Without a mapping, events still arrive in CMORE — description, location, and
-a link back to EarthRanger — but <em>unclassified</em>. The mapping is what fills in
-the structured tag fields.</p>
+<p>Only event types with a mapping are sent to CMORE. An event whose type has no
+entry here is skipped and noted in the connection's activity log, so nothing
+reaches CMORE until you add at least one entry. The mapping also fills in the
+structured tag fields.</p>
 <blockquote>
-<p><strong>Why unclassified matters:</strong> an unclassified event is visible on the map,
-but it's invisible to everything in CMORE that keys off classification —
-tag-based filtering and lookups, analytics, reporting, dashboards, and
-rule-based workflows will not include it. If you want an event type to
-count anywhere beyond the map view, it needs a mapping.</p>
+<p><strong>Why the connector insists on a mapping:</strong> an unclassified event in CMORE
+is visible on the map but invisible to everything that keys off
+classification — tag-based filtering and lookups, analytics, reporting,
+dashboards, and rule-based workflows. Sending events untagged also let
+historical and unexpected events flood CMORE before anyone had set up a
+mapping, so they are held back instead.</p>
 </blockquote>
 <p>In <strong>Deliver</strong>, add an entry to <strong>Event type → CMORE tag</strong>:</p>
 <ol>
@@ -999,8 +1001,13 @@ report is shared automatically. To share more event types, repeat Part 2.3
 </tr>
 <tr>
 <td><strong>Nothing arrives</strong> in CMORE at all</td>
-<td>Event type not in the ER share filter, or routing/credentials problem</td>
-<td><a href="../troubleshooting/#nothing-reaches-the-runner-at-all">Nothing reaches the runner at all</a></td>
+<td><strong>Event type → CMORE tag</strong> list is empty (every event is skipped), event type not in the ER share filter, or routing/credentials problem</td>
+<td><a href="../troubleshooting/#an-event-is-skipped-as-unmapped">An event is skipped as unmapped</a>, then <a href="../troubleshooting/#nothing-reaches-the-runner-at-all">Nothing reaches the runner at all</a></td>
+</tr>
+<tr>
+<td><strong>One event type never arrives</strong>, activity log shows <em>skipping event</em></td>
+<td>No <strong>Event type → CMORE tag</strong> entry for that type (Part 2.3)</td>
+<td><a href="../troubleshooting/#an-event-is-skipped-as-unmapped">An event is skipped as unmapped</a></td>
 </tr>
 <tr>
 <td><strong>Test Connection fails</strong></td>
