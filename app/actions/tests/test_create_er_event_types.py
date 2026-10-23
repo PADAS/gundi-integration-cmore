@@ -229,3 +229,115 @@ def test_missing_er_permissions_pure():
         "eventtype": ["add", "change"],
     }
     assert _missing_er_permissions({}) == _missing_er_permissions({"permissions": {}})
+
+
+# ----- Task 7: build, reconcile and write -----
+
+EVIDENCE_TYPE_OPTION_COUNT = 22
+
+
+def _existing_type(value="cmore_7932_20_old_name", keys=("f261_old_key",)):
+    return {
+        "value": value,
+        "display": "Old display",
+        "category": "cmore_7932",
+        "is_active": True,
+        "schema": {"json": {"properties": {k: {"type": "string"} for k in keys}}, "ui": {}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_unknown_tag_ref_fails_before_any_write(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    with pytest.raises(IntegrationConfigurationError, match="not found"):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["No Such Tag"]))
+    assert _write_calls(mock_er_admin) == 0
+
+
+@pytest.mark.asyncio
+async def test_dry_run_builds_but_writes_nothing(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    assert result["dry_run"] is True
+    assert result["category"] == {"value": "cmore_7932", "display": "CMORE group 7932", "action": "created"}
+    et = result["event_types"][0]
+    assert et["value"] == "cmore_7932_20_evidence_of_poacher" and et["action"] == "created"
+    assert et["fields"] == 5  # six CMORE fields minus Reported By
+    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT, "updated": 0, "deactivated": 0}
+    assert _write_calls(mock_er_admin) == 0
+
+
+@pytest.mark.asyncio
+async def test_first_run_creates_category_type_and_choices(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    mock_er_admin.post_event_category.assert_awaited_once_with(
+        {"value": "cmore_7932", "display": "CMORE group 7932", "is_active": True}
+    )
+    payload = mock_er_admin.post_event_type.await_args.args[0]
+    assert payload["value"] == "cmore_7932_20_evidence_of_poacher" and payload["category"] == "cmore_7932"
+    assert "f261_evidence_type" in payload["schema"]["json"]["properties"]
+    assert mock_er_admin.post_choice.await_count == EVIDENCE_TYPE_OPTION_COUNT
+    assert all(c.args[0]["field"] == "f261_evidence_type" for c in mock_er_admin.post_choice.await_args_list)
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    assert result["category"]["action"] == "created"
+    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT, "updated": 0, "deactivated": 0}
+
+
+@pytest.mark.asyncio
+async def test_share_group_label_names_the_category(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    await action_create_er_event_types(
+        integration, CreateErEventTypesConfig(tags=["20"], share_group_label="Lapalala CMORE")
+    )
+    assert mock_er_admin.post_event_category.await_args.args[0]["display"] == "Lapalala CMORE"
+
+
+@pytest.mark.asyncio
+async def test_second_run_patches_the_existing_type_and_leaves_choices(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_event_types.return_value = [_existing_type(), {"value": "rhino_carcass", "schema": {}}]
+    tag = next(t for t in RAW_TAGS[0]["tags"] if t["id"] == 20)
+    field = next(f for f in tag["fields"] if f["id"] == 261)
+    mock_er_admin.get_choices.return_value = [
+        {"id": str(i), "value": lk["value"], "display": lk["value"], "is_active": True, "ordernum": lk["order"]}
+        for i, lk in enumerate(field["lookups"])
+    ]
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    mock_er_admin.post_event_type.assert_not_awaited()
+    value, payload = mock_er_admin.patch_event_type.await_args.args
+    assert value == "cmore_7932_20_old_name" and payload["value"] == "cmore_7932_20_old_name"
+    assert "f261_old_key" in payload["schema"]["json"]["properties"]
+    assert "f261_evidence_type" not in payload["schema"]["json"]["properties"]
+    mock_er_admin.get_choices.assert_awaited_once_with("f261_old_key")
+    assert mock_er_admin.post_choice.await_count == 0 and mock_er_admin.patch_choice.await_count == 0
+    assert result["event_types"][0]["action"] == "updated"
+    assert result["choices"] == {"created": 0, "updated": 0, "deactivated": 0}
+
+
+@pytest.mark.asyncio
+async def test_existing_category_is_not_rewritten(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "Old"}]
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    mock_er_admin.post_event_category.assert_not_awaited()
+    assert result["category"] == {"value": "cmore_7932", "display": "Old", "action": "unchanged"}
+
+
+@pytest.mark.asyncio
+async def test_result_lists_skipped_and_shallow_fields(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20", "Poached Animal"], dry_run=True))
+    by_value = {et["value"]: et for et in result["event_types"]}
+    evidence = by_value["cmore_7932_20_evidence_of_poacher"]
+    assert evidence["skipped"][0]["name"] == "Reported By"
+    animal = by_value["cmore_7932_43_poached_animal"]
+    assert animal["shallow_fields"][0]["name"] == "Animal"
+
+
+@pytest.mark.asyncio
+async def test_activity_log_summarises_the_run(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    from gundi_core.schemas.v2 import LogLevel
+
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    levels = [c.kwargs["level"] for c in activity_log.await_args_list]
+    assert LogLevel.INFO in levels and LogLevel.WARNING in levels
+    summary = next(c for c in activity_log.await_args_list if c.kwargs["level"] == LogLevel.INFO)
+    assert summary.kwargs["data"]["event_types"] == 1
+    assert summary.kwargs["data"]["choices"]["created"] == EVIDENCE_TYPE_OPTION_COUNT
+    warning = next(c for c in activity_log.await_args_list if c.kwargs["level"] == LogLevel.WARNING)
+    assert "Evidence of Poacher" in warning.kwargs["title"]
