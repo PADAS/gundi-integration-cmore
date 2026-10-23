@@ -253,11 +253,12 @@ def _reference(action: str, params: Optional[dict] = None, *, target: str = "sel
 
 
 class DeliverConfig(PushActionConfiguration):
-    """Combined config for the single action_deliver handler.
-
-    Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
-    into one config since one handler now dispatches on payload type internally.
-    """
+    # Combined config for the single action_deliver handler.
+    #
+    # Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
+    # into one config since one handler now dispatches on payload type internally.
+    # (A comment, not a docstring: Pydantic would show a docstring as the
+    # form's description in the Gundi portal.)
 
     event_type_to_tag: Optional[List[CmoreTagMapping]] = FieldWithUIOptions(
         None,
@@ -460,14 +461,27 @@ class DeliverConfig(PushActionConfiguration):
 
 
 class CreateErEventTypesConfig(GenericActionConfiguration, ExecutableActionMixin):
-    """Form for the portal-triggered *Create EarthRanger event types* action.
+    # Form for the portal-triggered *Create EarthRanger event types* action.
+    #
+    # Creates one EarthRanger event type (with choice lists) per selected CMORE
+    # tag, in a category for this integration's share group, on the EarthRanger
+    # provider connected to this destination. Generated types are delivered by
+    # naming convention, so they need no ``event_type_to_tag`` entry (design:
+    # docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
+    # The portal shows the schema description above the form, so it is set
+    # explicitly to user-facing text instead of coming from a docstring.
 
-    Creates one EarthRanger event type (with choice lists) per selected CMORE
-    tag, in a category for this integration's share group, on the EarthRanger
-    provider connected to this destination. Generated types are delivered by
-    naming convention, so they need no ``event_type_to_tag`` entry (design:
-    docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
-    """
+    class Config:
+        schema_extra = {
+            "description": (
+                "Creates one EarthRanger event type, with its choice lists, for each "
+                "CMORE tag you select, on the EarthRanger site connected to this "
+                "destination. Events reported with these types are sent to CMORE with "
+                "no mapping to configure. Run it with Preview only first to check "
+                "permissions."
+            ),
+        }
+
 
     tags: List[str] = FieldWithUIOptions(
         ...,

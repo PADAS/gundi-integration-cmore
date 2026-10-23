@@ -169,3 +169,27 @@ def test_create_er_event_types_config_requires_tags():
         CreateErEventTypesConfig(tags=[])
     cfg = CreateErEventTypesConfig(tags=["20"])
     assert cfg.dry_run is False and cfg.share_group_label is None
+
+
+def test_portal_forms_show_no_developer_docstrings():
+    """The portal renders a config model's schema description above its
+    form, and Pydantic fills it from the class docstring. Forms must show
+    user-facing text only: no design-doc paths, handler names or history."""
+    from app.actions.configurations import CreateErEventTypesConfig, DeliverConfig
+
+    assert "description" not in DeliverConfig.schema()
+    description = CreateErEventTypesConfig.schema()["description"]
+    assert description == (
+        "Creates one EarthRanger event type, with its choice lists, for each CMORE tag you "
+        "select, on the EarthRanger site connected to this destination. Events reported with "
+        "these types are sent to CMORE with no mapping to configure. Run it with Preview only "
+        "first to check permissions."
+    )
+    for leak in ("docs/", "superpowers", "action_deliver", "event_type_to_tag", "``"):
+        assert leak not in description
+
+
+def test_create_er_event_types_has_a_readable_title():
+    from app.actions import handlers
+
+    assert getattr(handlers.action_create_er_event_types, "action_title", None) == "Create EarthRanger event types"

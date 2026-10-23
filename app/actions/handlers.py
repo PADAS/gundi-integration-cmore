@@ -49,6 +49,7 @@ from app.services.errors import IntegrationConfigurationError
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
 from .state import CmoreStateManager
+from .core import action_title
 from .configurations import AuthenticateConfig, CmoreFieldMapping, CmoreTagMapping, CreateErEventTypesConfig, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .reference_data import ReferenceDataResponse, ReferenceOption
 
@@ -1333,6 +1334,7 @@ async def _apply_choices(er: ErAdminClient, records_by_field: Dict[str, List[dic
                 await er.patch_choice(op.choice_id, op.payload)
 
 
+@action_title("Create EarthRanger event types")
 @activity_logger()
 async def action_create_er_event_types(
     integration: Integration, action_config: CreateErEventTypesConfig
