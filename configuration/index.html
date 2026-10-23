@@ -522,6 +522,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#create-earthranger-event-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create EarthRanger event types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Create EarthRanger event types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it needs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naming convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#field-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Field translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delivery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scaffolding-mappings-cli-alternative" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -669,8 +741,10 @@ the payload type (Observation / Event / EventUpdate), so all of the following
 live under the single Deliver config.</p>
 <h3 id="event-type-cmore-tag-event_type_to_tag">Event type → CMORE tag (<code>event_type_to_tag</code>)<a class="headerlink" href="#event-type-cmore-tag-event_type_to_tag" title="Permanent link">&para;</a></h3>
 <p>List mapping each Gundi <code>event_type</code> to a CMORE tag and its fields. <strong>Only
-event types in this list are sent to CMORE.</strong> An event whose type isn't listed
-(or any event, while the list is empty) is skipped and recorded in the
+event types in this list are sent to CMORE</strong> — plus event types the connector
+itself generated with <a href="#create-earthranger-event-types">Create EarthRanger event types</a>,
+which map by naming convention and need no entry here. An event whose type
+isn't listed (or any event, while the list is empty) is skipped and recorded in the
 connection's activity log as a warning — <em>No CMORE tag mapping for event type
 '…' — skipping event</em> — with the event type, EarthRanger serial number and the
 list of configured types. A tag entry with no field mappings still counts as
@@ -830,6 +904,145 @@ deduped by value</strong>:</p>
   slug). If they define the same slug with <em>different schemas</em>, the field and
   value lists are the union of both definitions.</li>
 </ul>
+<h2 id="create-earthranger-event-types">Create EarthRanger event types<a class="headerlink" href="#create-earthranger-event-types" title="Permanent link">&para;</a></h2>
+<p>The fastest way to get a reserve reporting into CMORE is to let the connector
+build the EarthRanger side from the CMORE tags. The <strong>Create EarthRanger event
+types</strong> action (on the CMORE integration's page in the Gundi portal, with a
+Run button) takes the CMORE tags you pick and, on the EarthRanger site
+connected to this destination, creates:</p>
+<ul>
+<li>one <strong>event category</strong> for this share group,</li>
+<li>one <strong>event type per tag</strong>, with a field per CMORE property, and</li>
+<li>one <strong>choice list</strong> per lookup property, holding the CMORE options.</li>
+</ul>
+<p>Events reported with these types deliver to CMORE with the tag and every
+mapped field filled, <strong>with no <code>event_type_to_tag</code> entry</strong>: the names carry
+the ids the connector needs.</p>
+<h3 id="the-form">The form<a class="headerlink" href="#the-form" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>CMORE tags</strong> — the tags to turn into event types, by ID (preferred) or
+  exact name; the dropdown is the same one the mapping list uses.</li>
+<li><strong>Share group label</strong> (optional) — display name of the EarthRanger category,
+  e.g. the reserve's name. Default <code>CMORE group &lt;Owner Group ID&gt;</code>. Only used
+  when the category is first created.</li>
+<li><strong>Preview only</strong> — checks the EarthRanger connection and permissions and
+  reports what would be created or updated, without writing. Run this first.</li>
+</ul>
+<h3 id="what-it-needs">What it needs<a class="headerlink" href="#what-it-needs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Exactly <strong>one EarthRanger provider</strong> connected to this CMORE destination in
+  Gundi. None or several stops the action with
+  <code>Expected exactly one connected EarthRanger provider, found N …</code>.</li>
+<li>That provider's EarthRanger user must be able to write what the action
+  creates. Before writing, the action checks and refuses with
+  <code>EarthRanger user '&lt;name&gt;' lacks permissions: …</code> naming what is missing:</li>
+<li><code>eventcategory: add</code> — to create the category, the first time. The user
+    who creates it is automatically given that category's own permission set.</li>
+<li><code>cmore_&lt;group&gt;: change, view</code> — once the category exists, EarthRanger
+    enforces its per-category permissions (<code>activity.cmore_&lt;group&gt;_update</code> /
+    <code>_read</code>) on the event types in it. Grant the user the category's
+    permission set if a different account created it.</li>
+<li><code>choice: add, change</code> — <code>choices.add_choice</code> / <code>change_choice</code>, needed
+    for the lookup options. EarthRanger does not list these on <code>user/me</code>, so
+    the action probes the choices endpoint without writing.
+  A superuser passes all of this. Grant permissions on the EarthRanger site
+  (Admin → Users → the user's permission sets).</li>
+<li>A saved integration: the action does not run on a draft.</li>
+</ul>
+<h3 id="naming-convention">Naming convention<a class="headerlink" href="#naming-convention" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Value</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Category</td>
+<td><code>cmore_&lt;group&gt;</code></td>
+<td><code>cmore_7932</code></td>
+</tr>
+<tr>
+<td>Event type</td>
+<td><code>cmore_&lt;group&gt;_&lt;tagid&gt;_&lt;slug&gt;</code></td>
+<td><code>cmore_7932_20_evidence_of_poacher</code></td>
+</tr>
+<tr>
+<td>Field key</td>
+<td><code>f&lt;fieldid&gt;_&lt;slug&gt;</code></td>
+<td><code>f261_evidence_type</code></td>
+</tr>
+<tr>
+<td>Choice value / display</td>
+<td>slug of the CMORE option / the option text</td>
+<td><code>abalone_harvesting</code> / <code>Abalone Harvesting</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>&lt;group&gt;</code> is this integration's <strong>Owner Group ID</strong>, so one EarthRanger site
+can serve several CMORE share groups: each CMORE integration delivers only
+the types that carry <em>its</em> group and skips the others as unmapped. The slug
+is cosmetic; on a re-run existing objects are matched by the id prefix, so a
+CMORE rename updates the display name but never creates a second type or
+field. Nothing in EarthRanger is ever deleted: deselected tags are left
+alone and dropped options are deactivated.</p>
+<h3 id="field-translation">Field translation<a class="headerlink" href="#field-translation" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>CMORE</th>
+<th>EarthRanger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>String, IDNumber</td>
+<td>text</td>
+</tr>
+<tr>
+<td>Text</td>
+<td>multi-line text</td>
+</tr>
+<tr>
+<td>Number, Duration</td>
+<td>number</td>
+</tr>
+<tr>
+<td>Boolean</td>
+<td>checkbox</td>
+</tr>
+<tr>
+<td>DateTime</td>
+<td>date/time</td>
+</tr>
+<tr>
+<td>Lookup, FixedLookup</td>
+<td>select, or multiselect when the tag allows multiple values</td>
+</tr>
+<tr>
+<td>Media, Message</td>
+<td>skipped</td>
+</tr>
+</tbody>
+</table>
+<p>Two more rules: a property named <strong>Reported by</strong> is skipped, because the
+connector fills it from the EarthRanger reporter (see
+<a href="#who-reported-the-event">Who reported the event</a>); and a lookup whose options
+have <strong>nested children</strong> (e.g. <em>Animal</em> → Hoof Animal → Buffalo) is offered at
+its <strong>top level only</strong> for now — the EarthRanger API cannot create sub-choices
+yet. Both are listed in the action result (<code>skipped</code>, <code>shallow_fields</code>) and in
+the activity log.</p>
+<h3 id="delivery">Delivery<a class="headerlink" href="#delivery" title="Permanent link">&para;</a></h3>
+<p>For an event whose type has no <code>event_type_to_tag</code> entry, the connector checks
+whether the type is one of its generated ones (<code>cmore_&lt;group&gt;_&lt;tagid&gt;_…</code> with
+its own group). If so, the tag comes from <code>&lt;tagid&gt;</code>, each <code>f&lt;fieldid&gt;_…</code> key in
+<code>event_details</code> goes to that field, and lookup values (the slugs EarthRanger
+stores, e.g. <code>abalone_harvesting</code>) are matched to the CMORE options ignoring
+case and punctuation. Keys that are not generated field keys (a field you
+added to the type by hand) are ignored. An explicit mapping entry for a
+generated type always wins over the convention.</p>
 <h2 id="scaffolding-mappings-cli-alternative">Scaffolding mappings (CLI alternative)<a class="headerlink" href="#scaffolding-mappings-cli-alternative" title="Permanent link">&para;</a></h2>
 <p>The repo ships a CLI that <strong>generates</strong> an <code>event_type_to_tag</code> mapping from a
 live ER event type + the CMORE tag schema, so you fill in only the genuine

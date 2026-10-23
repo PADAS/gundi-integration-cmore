@@ -418,6 +418,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#create-earthranger-event-types-cant-find-the-earthranger-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create EarthRanger event types can't find the EarthRanger site
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-earthranger-user-lacks-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The EarthRanger user lacks permissions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-field-is-missing-from-a-generated-event-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A field is missing from a generated event type
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#nothing-reaches-the-runner-at-all" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -588,6 +621,55 @@ untagged events. The entry's data carries <code>event_type</code>, <code>serial_
   mappings is enough to let it through), then re-send the event from
   EarthRanger; the skipped event is not retried.</li>
 </ul>
+<h2 id="create-earthranger-event-types-cant-find-the-earthranger-site">Create EarthRanger event types can't find the EarthRanger site<a class="headerlink" href="#create-earthranger-event-types-cant-find-the-earthranger-site" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>Expected exactly one connected EarthRanger provider, found 0 EarthRanger provider(s)
+</code></pre></div>
+<p>The action looks up the Gundi connections whose destination is this CMORE
+integration and keeps the EarthRanger providers. Zero means no EarthRanger
+provider is routed to this destination yet (create the connection in the Gundi
+portal first); two or more means the action can't tell which site to write to
+— run it from a CMORE integration that has exactly one EarthRanger provider,
+or split the integrations per site.</p>
+<p><code>The EarthRanger provider's site URL is missing or malformed</code> means the
+provider's Gundi <strong>base URL</strong> lacks a scheme or host (it should look like
+<code>https://&lt;site&gt;.pamdas.org</code>).</p>
+<h2 id="the-earthranger-user-lacks-permissions">The EarthRanger user lacks permissions<a class="headerlink" href="#the-earthranger-user-lacks-permissions" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>EarthRanger user 'lapalala-gundi' lacks permissions: choice: add, change; eventcategory: add
+</code></pre></div>
+<p>The connected EarthRanger provider's user is usually a data-ingest account.
+What it needs depends on where you are:</p>
+<ul>
+<li><strong>First run</strong> (no <code>cmore_&lt;group&gt;</code> category yet): <code>eventcategory: add</code>
+  (<code>activity.add_eventcategory</code>). Creating the category gives that same user
+  the category's own permission set.</li>
+<li><strong>Later runs</strong>: <code>cmore_&lt;group&gt;: change, view</code> — the category's per-category
+  permissions (<code>activity.cmore_&lt;group&gt;_update</code> / <code>_read</code>). If this appears, a
+  <em>different</em> account created the category; grant this user its permission
+  set.</li>
+<li><strong>Always</strong>: <code>choice: add, change</code> (<code>choices.add_choice</code> /
+  <code>choices.change_choice</code>) for the lookup options. These never show on
+  <code>user/me</code>, so the action probes the choices endpoint without writing.</li>
+</ul>
+<p>Grant them on the EarthRanger site (Admin → Users → the user's permission
+sets) and run the action again. <strong>Preview only</strong> performs this check without
+writing, so run it before the day you need the types. If a write still gets
+<code>EarthRanger refused a write (HTTP 403)</code>, the activity log entry <em>Creating
+EarthRanger event types stopped at …</em> lists what was completed; grant the
+permission and re-run — every step is idempotent.</p>
+<h2 id="a-field-is-missing-from-a-generated-event-type">A field is missing from a generated event type<a class="headerlink" href="#a-field-is-missing-from-a-generated-event-type" title="Permanent link">&para;</a></h2>
+<p>The action result and the activity log (<code>Fields skipped on &lt;tag&gt;</code>) list what
+was left out and why:</p>
+<ul>
+<li><code>skipped</code> — <code>filled from the EarthRanger reporter</code> (a <em>Reported by</em>
+  property; the connector sets it from the EarthRanger reporter, see
+  <a href="#the-reporter-isnt-shown-on-the-cmore-event">The reporter isn't shown</a>) or
+  <code>unsupported data type Media|Message</code> (no EarthRanger equivalent).</li>
+<li><code>shallow_fields</code> — a lookup whose options have nested children. Only the
+  top level is offered until the EarthRanger API can create sub-choices.</li>
+</ul>
+<p>A property you add to the generated type by hand is kept but ignored at
+delivery; put the value in a CMORE property through an explicit
+<a href="../configuration/#event-type--cmore-tag-event_type_to_tag">field mapping</a> instead.</p>
 <h2 id="nothing-reaches-the-runner-at-all">Nothing reaches the runner at all<a class="headerlink" href="#nothing-reaches-the-runner-at-all" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>broker_config.topic</code> not set</strong> on the destination integration. Without it,
