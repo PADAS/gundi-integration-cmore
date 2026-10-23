@@ -217,3 +217,182 @@ def build_event_type_spec(raw_tag: dict, group: int) -> EventTypeSpec:
         skipped=skipped,
         shallow_fields=shallow,
     )
+
+
+# ----- v2 schema payload -----
+
+SECTION_ID = "section-1"
+CHOICE_MODEL = "activity.event"
+_CHOICES_REF = "/api/v2.0/schemas/choices.json?field={field}"
+
+# EarthRanger's meta-schema requires "deprecated" on every json property and
+# has no integer variant (numbers are "number"). From earthranger-cli.
+_SCALAR_JSON: Dict[str, dict] = {
+    "string": {"type": "string"},
+    "textarea": {"type": "string"},
+    "number": {"type": "number"},
+    "boolean": {"type": "boolean"},
+    "datetime": {"type": "string", "format": "date-time"},
+}
+_SCALAR_UI: Dict[str, dict] = {
+    "string": {"type": "TEXT", "inputType": "SHORT_TEXT"},
+    "textarea": {"type": "TEXT", "inputType": "LONG_TEXT"},
+    "number": {"type": "NUMERIC"},
+    "boolean": {"type": "BOOLEAN"},
+    "datetime": {"type": "DATE_TIME"},
+}
+
+
+def _effective_key(field: FieldSpec, existing_keys: Dict[int, str]) -> str:
+    """The key an existing site already uses for this CMORE field, else the
+    generated one. Keys are never rewritten once created (Decision 6)."""
+    return existing_keys.get(field.cmore_field_id, field.key)
+
+
+def _property_pair(field: FieldSpec, key: str) -> tuple:
+    if field.type in _SCALAR_JSON:
+        json_prop = {**_SCALAR_JSON[field.type], "title": field.label, "deprecated": False}
+        ui_field = {**_SCALAR_UI[field.type], "parent": SECTION_ID}
+    else:
+        ref = _CHOICES_REF.format(field=key)
+        ui_field = {"type": "CHOICE_LIST", "inputType": "DROPDOWN", "parent": SECTION_ID}
+        if field.type == "multiselect":
+            json_prop = {
+                "type": "array",
+                "title": field.label,
+                "deprecated": False,
+                "uniqueItems": True,
+                "items": {"type": "string", "anyOf": [{"$ref": ref}]},
+            }
+        else:
+            json_prop = {"type": "string", "title": field.label, "deprecated": False, "anyOf": [{"$ref": ref}]}
+    if field.hint:
+        ui_field["placeholder"] = field.hint
+    return json_prop, ui_field
+
+
+def build_event_type_payload(
+    spec: EventTypeSpec,
+    *,
+    existing_value: Optional[str] = None,
+    existing_keys: Dict[int, str] = {},
+) -> dict:
+    """POST/PATCH body for the EarthRanger v2 event-type endpoint. On a
+    re-run ``existing_value`` and ``existing_keys`` keep what the site already
+    has, so only display, schema and is_active change."""
+    properties: Dict[str, dict] = {}
+    ui_fields: Dict[str, dict] = {}
+    left = []
+    required = []
+    for field in spec.fields:
+        key = _effective_key(field, existing_keys)
+        json_prop, ui_field = _property_pair(field, key)
+        properties[key] = json_prop
+        ui_fields[key] = ui_field
+        left.append({"name": key, "type": "field"})
+        if field.required:
+            required.append(key)
+    schema = {
+        "json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "unevaluatedProperties": False,
+            "properties": properties,
+            "required": required,
+        },
+        "ui": {
+            "fields": ui_fields,
+            "headers": {},
+            "order": [SECTION_ID],
+            "sections": {
+                SECTION_ID: {
+                    "label": spec.display,
+                    "columns": 1,
+                    "isActive": True,
+                    "leftColumn": left,
+                    "rightColumn": [],
+                }
+            },
+        },
+    }
+    return {
+        "value": existing_value or spec.value,
+        "display": spec.display,
+        "category": spec.category_value,
+        "is_active": True,
+        "schema": schema,
+    }
+
+
+# ----- choices -----
+
+
+def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}) -> Dict[str, List[dict]]:
+    """Desired ``Choice`` records per lookup field key, in CMORE order."""
+    records: Dict[str, List[dict]] = {}
+    for field in spec.fields:
+        if field.type not in ("select", "multiselect"):
+            continue
+        key = _effective_key(field, existing_keys)
+        records[key] = [
+            {
+                "model": CHOICE_MODEL,
+                "field": key,
+                "value": option.value,
+                "display": option.display,
+                "is_active": True,
+                "ordernum": option.ordernum,
+            }
+            for option in field.options
+        ]
+    return records
+
+
+class ChoiceOp(pydantic.BaseModel):
+    action: Literal["create", "update", "deactivate", "unchanged"]
+    value: str
+    payload: Optional[dict] = None  # POST/PATCH body; None for unchanged
+    choice_id: Optional[str] = None  # set for update / deactivate
+
+
+def _choice_sort_key(record: dict):
+    """Server display order: ordernum ascending, nulls last, then value."""
+    num = record.get("ordernum")
+    return (num is None, num if num is not None else 0, record.get("value") or "")
+
+
+def _differs(have: dict, want: dict, order_settled: bool) -> bool:
+    return (
+        have.get("display") != want["display"]
+        or not have.get("is_active", True)
+        or (not order_settled and have.get("ordernum") != want.get("ordernum"))
+    )
+
+
+def plan_field_choices(existing: List[dict], desired: List[dict]) -> List[ChoiceOp]:
+    """Diff one field's existing ``Choice`` records against the desired ones:
+    create missing, update changed display/order, deactivate extras. When
+    the visible (active, display-ordered) sequence already matches, the
+    server's numbering is left alone. From earthranger-cli's planner."""
+    ops: List[ChoiceOp] = []
+    existing_by_value = {c["value"]: c for c in existing}
+    desired_values = {d["value"] for d in desired}
+    active = [c for c in existing if c.get("is_active", True)]
+    order_settled = [c["value"] for c in sorted(active, key=_choice_sort_key)] == [
+        d["value"] for d in desired
+    ] and all(c.get("ordernum") is not None for c in active)
+    for want in desired:
+        have = existing_by_value.get(want["value"])
+        if have is None:
+            ops.append(ChoiceOp(action="create", value=want["value"], payload=want))
+        elif _differs(have, want, order_settled):
+            payload = {"display": want["display"], "is_active": True}
+            if not order_settled and have.get("ordernum") != want.get("ordernum"):
+                payload["ordernum"] = want.get("ordernum")
+            ops.append(ChoiceOp(action="update", value=want["value"], payload=payload, choice_id=str(have["id"])))
+        else:
+            ops.append(ChoiceOp(action="unchanged", value=want["value"]))
+    for have in existing:
+        if have["value"] not in desired_values and have.get("is_active", True):
+            ops.append(ChoiceOp(action="deactivate", value=have["value"], payload={"is_active": False}, choice_id=str(have["id"])))
+    return ops

@@ -165,3 +165,87 @@ def test_options_are_ordered_by_cmore_order_and_truncated():
     }]}
     opts = build_event_type_spec(raw, 1).fields[0].options
     assert [o.ordernum for o in opts] == [1, 2] and len(opts[0].value) == 100
+
+
+# ----- v2 payload and choices -----
+
+
+def test_payload_envelope_matches_the_v2_shape():
+    from app.datasource.er_event_types import build_event_type_payload, build_event_type_spec
+
+    p = build_event_type_payload(build_event_type_spec(_tag(20), 7932))
+    assert p["value"] == "cmore_7932_20_evidence_of_poacher" and p["display"] == "Evidence of Poacher"
+    assert p["category"] == "cmore_7932" and p["is_active"] is True
+    js, ui = p["schema"]["json"], p["schema"]["ui"]
+    assert js["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert js["type"] == "object" and js["unevaluatedProperties"] is False
+    assert ui["order"] == ["section-1"] and set(ui["fields"]) == set(js["properties"])
+    assert ui["headers"] == {}
+    assert ui["sections"]["section-1"]["leftColumn"][0] == {"name": "f261_evidence_type", "type": "field"}
+    assert ui["sections"]["section-1"]["rightColumn"] == []
+
+
+def test_scalar_and_choice_properties():
+    from app.datasource.er_event_types import build_event_type_payload, build_event_type_spec
+
+    p = build_event_type_payload(build_event_type_spec(_tag(20), 7932))
+    props, ui = p["schema"]["json"]["properties"], p["schema"]["ui"]["fields"]
+    assert props["f264_number_of_snares_found"] == {"type": "number", "title": "Number of Snares Found", "deprecated": False}
+    assert ui["f264_number_of_snares_found"] == {"type": "NUMERIC", "parent": "section-1", "placeholder": "Number of snares found"}
+    assert props["f261_evidence_type"] == {
+        "type": "array", "title": "Evidence Type", "deprecated": False, "uniqueItems": True,
+        "items": {"type": "string", "anyOf": [{"$ref": "/api/v2.0/schemas/choices.json?field=f261_evidence_type"}]},
+    }
+    assert ui["f261_evidence_type"] == {"type": "CHOICE_LIST", "inputType": "DROPDOWN", "parent": "section-1"}
+    assert ui["f262_cas_number"] == {"type": "TEXT", "inputType": "SHORT_TEXT", "parent": "section-1", "placeholder": "SAPS Crime Administration"}
+
+
+def test_required_fields_land_in_required():
+    from app.datasource.er_event_types import build_event_type_payload, build_event_type_spec
+
+    raw = {"id": 1, "name": "T", "fields": [{"id": 9, "name": "X", "dataType": "String", "isMandatory": True}]}
+    assert build_event_type_payload(build_event_type_spec(raw, 1))["schema"]["json"]["required"] == ["f9_x"]
+
+
+def test_existing_value_and_keys_are_kept_on_rerun():
+    from app.datasource.er_event_types import build_choice_records, build_event_type_payload, build_event_type_spec
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    p = build_event_type_payload(spec, existing_value="cmore_7932_20_old_name", existing_keys={261: "f261_old_key"})
+    assert p["value"] == "cmore_7932_20_old_name"
+    props = p["schema"]["json"]["properties"]
+    assert "f261_old_key" in props and "f261_evidence_type" not in props
+    assert props["f261_old_key"]["items"]["anyOf"][0]["$ref"].endswith("field=f261_old_key")
+    assert build_choice_records(spec, existing_keys={261: "f261_old_key"}).keys() == {"f261_old_key"}
+
+
+def test_choice_records_shape():
+    from app.datasource.er_event_types import build_choice_records, build_event_type_spec
+
+    recs = build_choice_records(build_event_type_spec(_tag(20), 7932))["f261_evidence_type"]
+    assert recs[0] == {"model": "activity.event", "field": "f261_evidence_type", "value": "Abalone Harvesting",
+                       "display": "Abalone Harvesting", "is_active": True, "ordernum": 1}
+
+
+def test_plan_field_choices_create_update_deactivate_unchanged():
+    from app.datasource.er_event_types import plan_field_choices
+
+    desired = [{"model": "activity.event", "field": "f", "value": "a", "display": "A", "is_active": True, "ordernum": 1},
+               {"model": "activity.event", "field": "f", "value": "b", "display": "B", "is_active": True, "ordernum": 2}]
+    existing = [{"id": "1", "value": "a", "display": "A", "is_active": True, "ordernum": 1},
+                {"id": "2", "value": "b", "display": "old", "is_active": True, "ordernum": 2},
+                {"id": "3", "value": "c", "display": "C", "is_active": True, "ordernum": 3}]
+    ops = {op.value: op for op in plan_field_choices(existing, desired)}
+    assert ops["a"].action == "unchanged"
+    assert ops["b"].action == "update" and ops["b"].choice_id == "2" and ops["b"].payload == {"display": "B", "is_active": True}
+    assert ops["c"].action == "deactivate" and ops["c"].choice_id == "3" and ops["c"].payload == {"is_active": False}
+    assert plan_field_choices([], desired)[0].action == "create"
+    assert plan_field_choices([], desired)[0].payload == desired[0]
+
+
+def test_plan_leaves_server_order_alone_when_visible_order_already_matches():
+    from app.datasource.er_event_types import plan_field_choices
+
+    desired = [{"model": "activity.event", "field": "f", "value": "a", "display": "A", "is_active": True, "ordernum": 1}]
+    existing = [{"id": "1", "value": "a", "display": "A", "is_active": True, "ordernum": 10}]
+    assert plan_field_choices(existing, desired)[0].action == "unchanged"
