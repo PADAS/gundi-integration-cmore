@@ -1118,7 +1118,8 @@ async def _push_attachment_as_comment(
 # (design: docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md)
 # ---------------------------------------------------------------------------
 
-ER_PROVIDER_TYPE = "earthranger"
+# The EarthRanger integration type's value in Gundi (dev and prod: "earth_ranger").
+ER_PROVIDER_TYPE = "earth_ranger"
 
 # What EarthRanger enforces on the writes this action makes (verified in
 # das): creating the category needs ``activity.add_eventcategory``; once the
@@ -1160,6 +1161,9 @@ async def _resolve_er_provider(integration: Integration) -> ErProvider:
         )
         provider_ids = []
         for connection in connections or []:
+            provider_type = getattr(connection.provider.type, "value", None)
+            if provider_type != ER_PROVIDER_TYPE:
+                continue
             provider_id = str(connection.provider.id)
             if provider_id not in provider_ids:
                 provider_ids.append(provider_id)
