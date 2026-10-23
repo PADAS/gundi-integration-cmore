@@ -517,6 +517,36 @@ async def test_unresolvable_reported_by_field_falls_back_to_the_comment(
 
 
 @pytest.mark.asyncio
+async def test_reporter_does_not_duplicate_a_field_already_written_by_a_field_mapping(
+    mocker, integration, provider_info, event, metadata
+):
+    """A field mapping that already fills the "Reported by" field wins: the
+    reporter is not appended as a second value for the same fieldId (CMORE
+    single-valued fields would get conflicting values) and goes into the
+    source comment instead."""
+    from app.actions.configurations import CmoreFieldMapping, CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=_tag_with_reported_by("Reported by"))
+
+    config = DeliverConfig(event_type_to_tag=[CmoreTagMapping(
+        event_type="lion_sighting", tag="42",
+        field_mappings=[CmoreFieldMapping(event_details_key="observer", cmore_field="103")],
+    )])
+    event.event_details = {"observer": "Field team B"}
+    event.provider_metadata = {"serial_number": 267, "reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [v.value for v in posted.tags[0].values if v.fieldId == 103] == ["Field team B"]
+    assert _source_comments(inner) == ["EarthRanger event #267 — Reported by: Jane Doe"]
+
+
+@pytest.mark.asyncio
 async def test_event_without_reporter_adds_no_value_and_no_comment_part(
     mocker, integration, deliver_config, provider_info, event, metadata
 ):

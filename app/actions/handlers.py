@@ -586,6 +586,18 @@ async def _build_event_tag(
     reporter = _get_reported_by(event)
     if reporter is not None:
         reporter_field = _reporter_field(tag_info, mapping)
+        if reporter_field is not None and any(v.fieldId == reporter_field.id for v in values):
+            # A field mapping already filled this field from event_details.
+            # That explicit choice wins: a second value for the same fieldId
+            # would hand CMORE conflicting values, so the reporter goes into
+            # the source comment instead.
+            logger.info(
+                "CMORE field %r (%d) already has a value from field_mappings; "
+                "the reporter goes into the source comment instead.",
+                reporter_field.name,
+                reporter_field.id,
+            )
+            reporter_field = None
         if reporter_field is not None:
             value = _resolve_field_value(reporter_field, reporter)
             if value is not None:
