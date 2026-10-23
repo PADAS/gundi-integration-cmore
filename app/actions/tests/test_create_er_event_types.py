@@ -37,7 +37,7 @@ def _er_integration(auth_data: dict, base_url: str = "https://site.pamdas.org/")
     data = _integration_dict(ER_INTEGRATION_ID)
     data["name"] = "Lapalala EarthRanger"
     data["base_url"] = base_url
-    data["type"]["value"] = "earthranger"
+    data["type"]["value"] = "earth_ranger"
     data["configurations"][0]["data"] = auth_data
     return Integration.parse_obj(data)
 
@@ -45,7 +45,7 @@ def _er_integration(auth_data: dict, base_url: str = "https://site.pamdas.org/")
 def _connection(provider_id: str = ER_INTEGRATION_ID) -> dict:
     return {
         "id": str(uuid.uuid4()),
-        "provider": {"id": provider_id, "name": "Lapalala EarthRanger", "type": {"id": str(uuid.uuid4()), "name": "EarthRanger", "value": "earthranger"}},
+        "provider": {"id": provider_id, "name": "Lapalala EarthRanger", "type": {"id": str(uuid.uuid4()), "name": "EarthRanger", "value": "earth_ranger"}},
         "destinations": [],
         "routing_rules": [],
         "default_route": None,
@@ -149,12 +149,26 @@ async def test_refuses_ephemeral_runs(integration, mock_gundi, mock_er_admin, mo
 async def test_resolves_the_single_connected_er_provider(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
     await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
     mock_gundi.get_connections.assert_awaited_once_with(
-        params={"destination_id": str(integration.id), "provider_type": "earthranger"}
+        params={"destination_id": str(integration.id), "provider_type": "earth_ranger"}
     )
     mock_gundi.get_integration_details.assert_awaited_once_with(ER_INTEGRATION_ID)
     kwargs = mock_er_admin.cls.call_args.kwargs
     assert mock_er_admin.cls.call_args.args == ("https://site.pamdas.org",)
     assert kwargs["token"] == "er-token" and kwargs["username"] is None and kwargs["password"] is None
+
+
+@pytest.mark.asyncio
+async def test_ignores_non_earthranger_providers_the_server_returns(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """Defence in depth over the server-side provider_type filter: a dev CMORE
+    destination is fed by EarthRanger, inReach and API-push providers, and a
+    filter the server ignores must not pick another provider's credentials."""
+    from gundi_core.schemas.v2 import Connection
+
+    other = _connection(str(uuid.uuid4()))
+    other["provider"]["type"]["value"] = "inreach"
+    mock_gundi.get_connections.return_value = [Connection.parse_obj(other), Connection.parse_obj(_connection())]
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    mock_gundi.get_integration_details.assert_awaited_once_with(ER_INTEGRATION_ID)
 
 
 @pytest.mark.asyncio

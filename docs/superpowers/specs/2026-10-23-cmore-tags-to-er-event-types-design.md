@@ -149,7 +149,7 @@ their names.
    left alone; nothing is deleted.
 7. **Finding the EarthRanger site, and checking it can be written to.** The
    handler lists Gundi connections filtered by `destination_id` = this
-   integration and `provider_type` = `earthranger` (cdip's `ConnectionFilter`
+   integration and `provider_type` = `earth_ranger` (cdip's `ConnectionFilter`
    supports both), then reads the provider's `auth` configuration (token, or
    username + password exchanged at `<site>/oauth2/token` with client id
    `das_web_client`) and `base_url` (site root = scheme + host) through
