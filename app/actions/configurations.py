@@ -3,7 +3,13 @@ from typing import List, Optional
 import pydantic
 from app.datasource.schemas import Affiliation, CmoreClassification
 from app.services.utils import FieldWithUIOptions, GlobalUISchemaOptions, UIOptions
-from .core import AuthActionConfiguration, ExecutableActionMixin, PushActionConfiguration, ReferenceActionConfiguration
+from .core import (
+    AuthActionConfiguration,
+    ExecutableActionMixin,
+    GenericActionConfiguration,
+    PushActionConfiguration,
+    ReferenceActionConfiguration,
+)
 
 
 class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
@@ -450,4 +456,60 @@ class DeliverConfig(PushActionConfiguration):
                 "type": {"$data": "type"},
             },
         )
+        return base
+
+
+class CreateErEventTypesConfig(GenericActionConfiguration, ExecutableActionMixin):
+    """Form for the portal-triggered *Create EarthRanger event types* action.
+
+    Creates one EarthRanger event type (with choice lists) per selected CMORE
+    tag, in a category for this integration's share group, on the EarthRanger
+    provider connected to this destination. Generated types are delivered by
+    naming convention, so they need no ``event_type_to_tag`` entry (design:
+    docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
+    """
+
+    tags: List[str] = FieldWithUIOptions(
+        ...,
+        min_items=1,
+        title="CMORE tags",
+        description=(
+            "The CMORE tags to turn into EarthRanger event types, by tag ID "
+            "(preferred) or exact name. One EarthRanger event type is created "
+            "or updated per tag."
+        ),
+    )
+    share_group_label: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Share group label",
+        description=(
+            "Display name for the EarthRanger event category that holds these "
+            "types, e.g. the reserve's name. Defaults to 'CMORE group <Owner "
+            "Group ID>'. Only used when the category is first created."
+        ),
+    )
+    dry_run: bool = FieldWithUIOptions(
+        False,
+        title="Preview only",
+        description=(
+            "Check the EarthRanger connection and permissions and report what "
+            "would be created or updated, without writing anything."
+        ),
+    )
+
+    @classmethod
+    def ui_schema(cls, *args, **kwargs):
+        base = super().ui_schema(*args, **kwargs)
+        base.update({
+            "ui:order": ["tags", "share_group_label", "dry_run"],
+            "tags": {
+                "items": {
+                    "ui:placeholder": "e.g. 8443 or Rhino Carcass",
+                    # Same dropdown the mapping list uses (inert until the
+                    # portal supports reference annotations).
+                    "gundi:reference": _reference("list_tag_names"),
+                },
+            },
+            "share_group_label": {"ui:placeholder": "e.g. Lapalala CMORE"},
+        })
         return base
