@@ -412,6 +412,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#who-reported-the-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who reported the event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#how-tag-and-field-refs-are-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -679,7 +690,29 @@ dashboards and rule-based workflows — so there is little value in them.</p>
 <li><strong>Field Mappings</strong> — list of <strong>CmoreFieldMapping</strong>:</li>
 <li><strong>Gundi event_details key</strong> → <strong>CMORE Field</strong> (field ID preferred, or exact field name — within the chosen tag).</li>
 <li><strong>Value Mappings</strong> (optional) — list of <code>source value → CMORE value</code> pairs.</li>
+<li><strong>Reported by field</strong> (optional) — the CMORE field, within the chosen tag,
+  that receives the name of the EarthRanger user or subject who reported the
+  event. See <a href="#who-reported-the-event">Who reported the event</a>.</li>
 </ul>
+<h4 id="who-reported-the-event">Who reported the event<a class="headerlink" href="#who-reported-the-event" title="Permanent link">&para;</a></h4>
+<p>CMORE records every synced event as created by the integration account; the
+API offers no way to post as someone else. The connector therefore carries the
+original reporter — the EarthRanger user (first and last name, or username) or
+subject (its name) on the event's <strong>Reported by</strong> — into the event itself:</p>
+<ol>
+<li><strong>Tag field.</strong> If <strong>Reported by field</strong> is set and resolves, the name is
+   written there. If it is blank, the connector uses the first field on the
+   tag whose name is <em>Reported by</em> (any case) — most CMORE tag domains define
+   one, so this usually needs no configuration.</li>
+<li><strong>Source comment.</strong> When the tag has no such field, the configured one
+   does not resolve, or a <strong>Field Mapping</strong> already fills that field from
+   <code>event_details</code> (the explicit mapping wins; both cases are logged), the
+   name is appended to the source comment instead:
+   <code>EarthRanger event #267 — Reported by: Jane Doe — Source: &lt;url&gt;</code>.</li>
+</ol>
+<p>The reporter arrives via <code>provider_metadata.reported_by</code>, stamped by the
+EarthRanger runner (gundi-integration-earthranger #54 or later). An older
+runner sends nothing, and the event posts exactly as before.</p>
 <h4 id="how-tag-and-field-refs-are-resolved">How tag and field refs are resolved<a class="headerlink" href="#how-tag-and-field-refs-are-resolved" title="Permanent link">&para;</a></h4>
 <p>The <strong>CMORE Tag</strong> and <strong>CMORE Field</strong> values accept either the immutable
 numeric <strong>ID</strong> or the exact <strong>name</strong>:</p>

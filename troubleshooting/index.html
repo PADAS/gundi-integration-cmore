@@ -440,6 +440,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-reporter-isnt-shown-on-the-cmore-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The reporter isn't shown on the CMORE event
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#attachments-dont-appear-in-cmore" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -602,6 +613,23 @@ the runner. The whole chain must carry it:</p>
 <div class="highlight"><pre><span></span><code>_push_event received: ... provider_metadata={'source_event_url': '...'}
 </code></pre></div>
 <code>provider_metadata=None</code> there means it was dropped upstream.</p>
+<h2 id="the-reporter-isnt-shown-on-the-cmore-event">The reporter isn't shown on the CMORE event<a class="headerlink" href="#the-reporter-isnt-shown-on-the-cmore-event" title="Permanent link">&para;</a></h2>
+<p>The EarthRanger reporter should appear in the tag's <strong>Reported by</strong> field, or
+else in the source comment (<code>… — Reported by: Jane Doe — …</code>). See
+<a href="../configuration/#who-reported-the-event">Who reported the event</a>. If neither
+shows it:</p>
+<ul>
+<li><strong>The event has no reporter in EarthRanger.</strong> Nothing is sent; CMORE shows
+  only the integration account as creator.</li>
+<li><strong>The name never reached the runner.</strong> Same chain as the deep link above:
+  the EarthRanger runner must be at gundi-integration-earthranger #54 or
+  later to stamp <code>provider_metadata.reported_by</code>. The <code>_push_event received</code>
+  log line shows what arrived.</li>
+<li><strong>It landed in the comment but you expected the field.</strong> The tag has no
+  field named <em>Reported by</em>, or the configured <strong>Reported by field</strong> doesn't
+  resolve (logged as <code>has no field … (reported_by_field)</code>). Set the field ID
+  explicitly in the mapping.</li>
+</ul>
 <h2 id="attachments-dont-appear-in-cmore">Attachments don't appear in CMORE<a class="headerlink" href="#attachments-dont-appear-in-cmore" title="Permanent link">&para;</a></h2>
 <p>Photos/files on an ER event should arrive as <strong>media comments</strong> on the
 delivered CMORE event (titled <code>EarthRanger attachment: &lt;filename&gt;</code>). Check in
