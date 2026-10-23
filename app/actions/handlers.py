@@ -26,7 +26,9 @@ from app.datasource.er_event_types import (
     build_event_type_payload,
     build_event_type_spec,
     category_value,
+    CHOICE_VALUE_LIMIT,
     generated_type_prefix,
+    parse_generated_event_type,
     parse_generated_field_key,
     plan_field_choices,
 )
@@ -47,7 +49,7 @@ from app.services.errors import IntegrationConfigurationError
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
 from .state import CmoreStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, CreateErEventTypesConfig, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
+from .configurations import AuthenticateConfig, CmoreFieldMapping, CmoreTagMapping, CreateErEventTypesConfig, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .reference_data import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -473,6 +475,14 @@ def _resolve_field_value(field_info, candidate: str) -> Optional[str]:
             option = lookup.get("value")
             if option is not None and _normalize_for_match(option) == target:
                 return option
+        # A generated EarthRanger choice value is the CMORE option cut to the
+        # Choice.value limit, so a candidate of exactly that length may be a
+        # prefix of the real option. Only then is a prefix match accepted.
+        if len(str(candidate)) == CHOICE_VALUE_LIMIT:
+            for lookup in field_info.lookups or []:
+                option = lookup.get("value")
+                if option is not None and _normalize_for_match(option).startswith(target):
+                    return option
         logger.warning(
             "CMORE field %r (%s) has no option matching %r; dropping value. "
             "Valid options: %s",
@@ -545,8 +555,16 @@ async def _build_event_tag(
     integration_id: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
+    *,
+    convention: bool = False,
 ) -> Tuple[Optional[CmoreEventTag], bool]:
     """Resolve mapping + event_details into a CmoreEventTag.
+
+    With ``convention=True`` the event type was generated from this tag by
+    ``action_create_er_event_types``: ``mapping`` carries only the tag, and
+    the fields come from the event_details keys themselves (``f<fieldid>_…``),
+    with no value mappings. Keys that are not generated field keys on this
+    tag (an operator added a field by hand) are ignored.
 
     Returns ``(tag, reporter_placed)``. ``tag`` is None if the configured tag
     is not found on the C-more instance — the event still gets posted (with
@@ -577,7 +595,15 @@ async def _build_event_tag(
 
     details = event.event_details or {}
     values = []
-    for fm in (mapping.field_mappings or []):
+    field_mappings = list(mapping.field_mappings or [])
+    if convention:
+        field_mappings = [
+            CmoreFieldMapping(event_details_key=key, cmore_field=str(field_id))
+            for key in details
+            for field_id in [parse_generated_field_key(key)]
+            if field_id is not None and field_id in tag_info.fields_by_id
+        ]
+    for fm in field_mappings:
         ed_key = fm.event_details_key
         field_ref = fm.cmore_field
         field_info = tag_info.resolve_field(field_ref)
@@ -730,6 +756,17 @@ async def _push_event(
             None,
         )
 
+    # Generated event types (action_create_er_event_types) carry the CMORE
+    # tag id in their name, qualified by this integration's share group, so
+    # they map by convention with no stored entry. An explicit entry above
+    # always wins; another group's generated type is unmapped here.
+    convention = False
+    if mapping is None and event.event_type:
+        generated_tag_id = parse_generated_event_type(event.event_type, auth.owner_group_id)
+        if generated_tag_id is not None:
+            mapping = CmoreTagMapping(event_type=event.event_type, tag=str(generated_tag_id), field_mappings=[])
+            convention = True
+
     if mapping is None:
         # Guardrail: an event whose type has no "Event type → CMORE tag" entry
         # (or when no entries are configured at all) is NOT posted. Posting it
@@ -760,7 +797,7 @@ async def _push_event(
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None
         tag, reporter_placed = await _build_event_tag(
-            client, auth.base_url, str(integration.id), mapping, event
+            client, auth.base_url, str(integration.id), mapping, event, convention=convention
         )
         if tag is not None:
             tags = [tag]
