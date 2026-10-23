@@ -7,14 +7,19 @@ import os
 import re
 import traceback
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+
+import pydantic
 
 from gundi_core import schemas
 from gundi_core.events import GundiDelivery
 from gundi_core.schemas.v2 import Integration, LogLevel
+from gundi_client_v2 import GundiClient
 from gundi_client_v2.transformations import apply_transformations
 
 from app.datasource.client import CmoreClient
+from app.datasource.er_admin_client import ErAdminClient
 from app.datasource.schemas import (
     CmoreClassification,
     CmoreComment,
@@ -27,11 +32,12 @@ from app.datasource.schemas import (
     UploadType,
 )
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
-from app.services.activity_logger import activity_logger, log_action_activity
+from app.services.activity_logger import activity_logger, ephemeral_run, log_action_activity
+from app.services.errors import IntegrationConfigurationError
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
 from .state import CmoreStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
+from .configurations import AuthenticateConfig, CmoreTagMapping, CreateErEventTypesConfig, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .reference_data import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -1058,6 +1064,122 @@ async def _push_attachment_as_comment(
         "cmore_response": response,
     }
 
+
+
+# ---------------------------------------------------------------------------
+# Create EarthRanger event types from CMORE tags
+# (design: docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md)
+# ---------------------------------------------------------------------------
+
+ER_PROVIDER_TYPE = "earthranger"
+
+# What the connected EarthRanger user must be allowed to do before this
+# action writes anything. Keys are the resource names user/me reports.
+REQUIRED_ER_PERMISSIONS: Dict[str, set] = {
+    "eventcategory": {"add"},
+    "eventtype": {"add", "change"},
+    "choice": {"add", "change"},
+}
+
+
+class ErProvider(pydantic.BaseModel):
+    """The connected EarthRanger provider's site and credentials, read from
+    its own Gundi auth configuration."""
+    integration_id: str
+    name: str = ""
+    site_root: str
+    token: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+def _er_site_root(base_url: Optional[str]) -> str:
+    parsed = urlparse(base_url or "")
+    if not (parsed.scheme and parsed.hostname):
+        raise IntegrationConfigurationError(
+            "The EarthRanger provider's site URL is missing or malformed"
+        )
+    return f"{parsed.scheme}://{parsed.hostname}"
+
+
+async def _resolve_er_provider(integration: Integration) -> ErProvider:
+    """The one EarthRanger provider connected to this destination, with its
+    auth config. None or several is a configuration error, not a guess."""
+    async with GundiClient() as gundi:
+        connections = await gundi.get_connections(
+            params={"destination_id": str(integration.id), "provider_type": ER_PROVIDER_TYPE}
+        )
+        provider_ids = []
+        for connection in connections or []:
+            provider_id = str(connection.provider.id)
+            if provider_id not in provider_ids:
+                provider_ids.append(provider_id)
+        if len(provider_ids) != 1:
+            raise IntegrationConfigurationError(
+                "Expected exactly one connected EarthRanger provider, found "
+                f"{len(provider_ids)} EarthRanger provider(s)"
+            )
+        er_integration = await gundi.get_integration_details(provider_ids[0])
+    auth = er_integration.get_action_config("auth")
+    data = dict(auth.data or {}) if auth else {}
+    return ErProvider(
+        integration_id=provider_ids[0],
+        name=er_integration.name or "",
+        site_root=_er_site_root(er_integration.base_url),
+        token=data.get("token") or None,
+        username=data.get("username") or None,
+        password=data.get("password") or None,
+    )
+
+
+def _missing_er_permissions(me: dict) -> Dict[str, List[str]]:
+    """Required verbs the user/me document does not grant, per resource."""
+    granted = (me or {}).get("permissions") or {}
+    missing: Dict[str, List[str]] = {}
+    for resource, verbs in REQUIRED_ER_PERMISSIONS.items():
+        have = set(granted.get(resource) or [])
+        lacking = sorted(verbs - have)
+        if lacking:
+            missing[resource] = lacking
+    return missing
+
+
+async def _er_preflight(er: ErAdminClient) -> dict:
+    me = await er.get_me()
+    missing = _missing_er_permissions(me)
+    username = (me or {}).get("username") or "<unknown>"
+    if missing:
+        detail = "; ".join(f"{resource}: {', '.join(verbs)}" for resource, verbs in sorted(missing.items()))
+        raise IntegrationConfigurationError(
+            f"EarthRanger user {username!r} lacks permissions: {detail}"
+        )
+    return {"username": username, "permissions_ok": True}
+
+
+@activity_logger()
+async def action_create_er_event_types(
+    integration: Integration, action_config: CreateErEventTypesConfig
+) -> dict:
+    """Create or update one EarthRanger event type (and choice lists) per
+    selected CMORE tag, on the EarthRanger provider connected to this
+    destination. Generated types are delivered by naming convention."""
+    if ephemeral_run.get():
+        raise IntegrationConfigurationError(
+            "This action writes to EarthRanger and only runs on a saved integration"
+        )
+    provider = await _resolve_er_provider(integration)
+    async with ErAdminClient(
+        provider.site_root, token=provider.token, username=provider.username, password=provider.password
+    ) as er:
+        preflight = await _er_preflight(er)
+        result = {
+            "earthranger": {"site": provider.site_root, **preflight},
+            "category": None,
+            "event_types": [],
+            "choices": {"created": 0, "updated": 0, "deactivated": 0},
+            "dry_run": action_config.dry_run,
+        }
+    return result
 
 @activity_logger()
 async def action_deliver(
