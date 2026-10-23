@@ -1,0 +1,1169 @@
+[
+ {
+  "id": 8,
+  "name": "Wildlife",
+  "iconId": null,
+  "tags": [
+   {
+    "id": 20,
+    "name": "Evidence of Poacher",
+    "hint": null,
+    "definition": null,
+    "keywords": null,
+    "color": "#eb883d",
+    "tagDomainId": 8,
+    "iconId": 3449,
+    "properties": null,
+    "order": 1,
+    "typeLimiter": "Incident",
+    "isRestricted": false,
+    "fields": [
+     {
+      "id": 260,
+      "name": "Reported By",
+      "longName": null,
+      "hint": "",
+      "dataType": "String",
+      "iconId": null,
+      "order": 1,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 261,
+      "name": "Evidence Type",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 2,
+      "isMandatory": false,
+      "allowMultipleValues": true,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 1667,
+        "value": "Abalone Harvesting",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 1668,
+        "value": "Bait Collection",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 1669,
+        "value": "Camp",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2667,
+        "value": "Abalone",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2668,
+        "value": "Canoe",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2669,
+        "value": "Clothing",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2670,
+        "value": "Drop-off",
+        "order": 7,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2671,
+        "value": "Dung Harsdfsfsdfsds",
+        "order": 8,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2672,
+        "value": "Firearm Cartridge",
+        "order": 9,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2673,
+        "value": "Firearm Cartridge Casing",
+        "order": 10,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2674,
+        "value": "Fishing Gear",
+        "order": 11,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2675,
+        "value": "Gear",
+        "order": 12,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2676,
+        "value": "Honey Harvesting",
+        "order": 13,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2677,
+        "value": "Hunting dog",
+        "order": 14,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2678,
+        "value": "Illegal Vessel Launching",
+        "order": 15,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2679,
+        "value": "Muti Harvesting",
+        "order": 16,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2680,
+        "value": "Net",
+        "order": 17,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2681,
+        "value": "Pick-up",
+        "order": 18,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2682,
+        "value": "Shoes",
+        "order": 19,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2683,
+        "value": "Snare",
+        "order": 20,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2684,
+        "value": "Trap",
+        "order": 21,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2685,
+        "value": "Wood Harvesting",
+        "order": 22,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 262,
+      "name": "CAS Number",
+      "longName": null,
+      "hint": "SAPS Crime Administration",
+      "dataType": "String",
+      "iconId": null,
+      "order": 3,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 263,
+      "name": "Evidence Bag No",
+      "longName": null,
+      "hint": "Evidence Bag Number",
+      "dataType": "String",
+      "iconId": null,
+      "order": 4,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 264,
+      "name": "Number of Snares Found",
+      "longName": null,
+      "hint": "Number of snares found",
+      "dataType": "Number",
+      "iconId": null,
+      "order": 5,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 265,
+      "name": "SAP 13",
+      "longName": null,
+      "hint": "",
+      "dataType": "String",
+      "iconId": null,
+      "order": 6,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     }
+    ],
+    "createFromPortalOnly": false,
+    "parentTag": false,
+    "childrenTags": null
+   },
+   {
+    "id": 29,
+    "name": "Poacher Sighting",
+    "hint": null,
+    "definition": null,
+    "keywords": null,
+    "color": "#35d3db",
+    "tagDomainId": 8,
+    "iconId": 3454,
+    "properties": null,
+    "order": 10,
+    "typeLimiter": "Incident",
+    "isRestricted": false,
+    "fields": [
+     {
+      "id": 1327,
+      "name": "Direction",
+      "longName": null,
+      "hint": "Which direction is the poacher heading to?",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 1,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 2799,
+        "value": "E to W",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2800,
+        "value": "N to S",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2801,
+        "value": "NE to SW",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2802,
+        "value": "NW to SE",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2803,
+        "value": "S to N",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2804,
+        "value": "SE to NW",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2805,
+        "value": "SW to NE",
+        "order": 7,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2806,
+        "value": "W to E",
+        "order": 8,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 1328,
+      "name": "Number of People",
+      "longName": null,
+      "hint": "",
+      "dataType": "Number",
+      "iconId": null,
+      "order": 2,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 1329,
+      "name": "Main Weapon",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 3,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 2807,
+        "value": "None",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2808,
+        "value": "Axe",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2809,
+        "value": "Bow",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2810,
+        "value": "Dog",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2811,
+        "value": "Firearm",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2812,
+        "value": "Fish Net",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2813,
+        "value": "Fish Trap",
+        "order": 7,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2814,
+        "value": "Fishing Rod",
+        "order": 8,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2815,
+        "value": "Gin Trap",
+        "order": 9,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2816,
+        "value": "Knife",
+        "order": 10,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2817,
+        "value": "Panga",
+        "order": 11,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2818,
+        "value": "Poison",
+        "order": 12,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2819,
+        "value": "Snare",
+        "order": 13,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2820,
+        "value": "Spear",
+        "order": 14,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 2821,
+        "value": "Other",
+        "order": 15,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 1330,
+      "name": "Reported by",
+      "longName": null,
+      "hint": "",
+      "dataType": "String",
+      "iconId": null,
+      "order": 4,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     }
+    ],
+    "createFromPortalOnly": false,
+    "parentTag": false,
+    "childrenTags": null
+   },
+   {
+    "id": 43,
+    "name": "Poached Animal",
+    "hint": null,
+    "definition": null,
+    "keywords": null,
+    "color": "#db8e1a",
+    "tagDomainId": 8,
+    "iconId": 3459,
+    "properties": null,
+    "order": 24,
+    "typeLimiter": "Incident",
+    "isRestricted": false,
+    "fields": [
+     {
+      "id": 1478,
+      "name": "Animal",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 1,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 3127,
+        "value": "Birds",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3138,
+          "value": "Abdims' Stork",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3139,
+          "value": "African Fish Eagle",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3140,
+          "value": "African Marsh Harrier",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3141,
+          "value": "African Spoonbill",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3156,
+          "value": "Bank Comorant",
+          "order": 5,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3128,
+        "value": "Hoof Animal",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3142,
+          "value": "Black Face Impala",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3143,
+          "value": "Black Wildebeest",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3144,
+          "value": "Blesbok",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3145,
+          "value": "Buffalo",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3146,
+          "value": "Burchell's Zebra",
+          "order": 5,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3129,
+        "value": "Insects",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3147,
+          "value": "Bee Hive",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3148,
+          "value": "Emperor Moth",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3149,
+          "value": "Mopani Worm",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3150,
+          "value": "Other Insect",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3130,
+        "value": "Large Predators",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3151,
+          "value": "Aardwolf",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3152,
+          "value": "Brown Hyaena",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3153,
+          "value": "Caracal",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3154,
+          "value": "Cheetah",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3155,
+          "value": "Leopard",
+          "order": 5,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3131,
+        "value": "Pachyderms",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3157,
+          "value": "Black Rhino",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3158,
+          "value": "Elephant",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3159,
+          "value": "Hippo",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3160,
+          "value": "White Rhino",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3132,
+        "value": "Reptiles",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3161,
+          "value": "African Dwarf Python",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3162,
+          "value": "African Rock Python",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3163,
+          "value": "Anchieta's Cobra",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3164,
+          "value": "Banded Cobra",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3165,
+          "value": "Black Mamba",
+          "order": 5,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3133,
+        "value": "Small Mammals",
+        "order": 7,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3166,
+          "value": "African Wild Cat",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3167,
+          "value": "Antbear",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3168,
+          "value": "Baboon",
+          "order": 3,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3169,
+          "value": "Banded Mongoose",
+          "order": 4,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3170,
+          "value": "Bat-eared Fox",
+          "order": 5,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3134,
+        "value": "Amphibian",
+        "order": 8,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3171,
+          "value": "Cape River Frog",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3172,
+          "value": "Tadpoles",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3135,
+        "value": "Arachnid",
+        "order": 9,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3173,
+          "value": "Golden Orb Spider",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3174,
+          "value": "Jumping Spider",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3136,
+        "value": "Mollusca",
+        "order": 10,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3175,
+          "value": "Periwinkle",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3176,
+          "value": "Rocky Pool Species",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       },
+       {
+        "id": 3137,
+        "value": "Echinoderm",
+        "order": 11,
+        "iconId": null,
+        "linkedLookups": [
+         {
+          "id": 3177,
+          "value": "Starfish",
+          "order": 1,
+          "iconId": null,
+          "linkedLookups": []
+         },
+         {
+          "id": 3178,
+          "value": "Sea Urchin",
+          "order": 2,
+          "iconId": null,
+          "linkedLookups": []
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": 2260,
+      "name": "Animal Age",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 2,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 3667,
+        "value": "Adult",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3668,
+        "value": "Sub-Adult",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3669,
+        "value": "Juvenile",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 2261,
+      "name": "Animal Sex",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 3,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 3670,
+        "value": "Male",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3671,
+        "value": "Female",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3672,
+        "value": "Indeterminable",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 2262,
+      "name": "State",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 4,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 3673,
+        "value": "Alive",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3674,
+        "value": "Died Today",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3675,
+        "value": "Fresh Carcass (less than 3 days)",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3676,
+        "value": "Recent Carcass (3 days - 1 week)",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3677,
+        "value": "Current Carcass (1 week - 1 month)",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3678,
+        "value": "Old Carcass (1 - 6 months)",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3679,
+        "value": "Very Old Carcass (over 6 months)",
+        "order": 7,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     },
+     {
+      "id": 2263,
+      "name": "Count",
+      "longName": null,
+      "hint": "",
+      "dataType": "Number",
+      "iconId": null,
+      "order": 5,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": []
+     },
+     {
+      "id": 2264,
+      "name": "Method of Poaching",
+      "longName": null,
+      "hint": "",
+      "dataType": "Lookup",
+      "iconId": null,
+      "order": 6,
+      "isMandatory": false,
+      "allowMultipleValues": false,
+      "isSticky": false,
+      "isReadOnly": false,
+      "excludeFutureDates": false,
+      "excludePastDates": false,
+      "acceptedTagId": null,
+      "lookups": [
+       {
+        "id": 3680,
+        "value": "Dogs and Spotlight",
+        "order": 1,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3681,
+        "value": "Gin Trap",
+        "order": 2,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3682,
+        "value": "Poison",
+        "order": 3,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3683,
+        "value": "Shot",
+        "order": 4,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3684,
+        "value": "Snare",
+        "order": 5,
+        "iconId": null,
+        "linkedLookups": []
+       },
+       {
+        "id": 3685,
+        "value": "Spear",
+        "order": 6,
+        "iconId": null,
+        "linkedLookups": []
+       }
+      ]
+     }
+    ],
+    "createFromPortalOnly": false,
+    "parentTag": false,
+    "childrenTags": null
+   }
+  ]
+ }
+]
