@@ -245,6 +245,16 @@ Rhino Carcass tag.
 
 ### 2.3 Map the event type to a CMORE tag
 
+> **Fast path:** if you don't already have an EarthRanger event type for this
+> tag, skip the hand mapping. On the CMORE destination, run **Create
+> EarthRanger event types** with the tags you want (tick **Preview only**
+> first to check permissions). It builds the event type, its fields and
+> choice lists on your EarthRanger site, and events of those types deliver
+> with no mapping at all. See
+> [Create EarthRanger event types](configuration.md#create-earthranger-event-types).
+> The rest of this part shows the manual mapping, which you still need for
+> event types you already have.
+
 Only event types with a mapping are sent to CMORE. An event whose type has no
 entry here is skipped and noted in the connection's activity log, so nothing
 reaches CMORE until you add at least one entry. The mapping also fills in the

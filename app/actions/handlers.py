@@ -7,14 +7,31 @@ import os
 import re
 import traceback
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+
+import pydantic
 
 from gundi_core import schemas
 from gundi_core.events import GundiDelivery
 from gundi_core.schemas.v2 import Integration, LogLevel
+from gundi_client_v2 import GundiClient
 from gundi_client_v2.transformations import apply_transformations
 
 from app.datasource.client import CmoreClient
+from app.datasource.er_admin_client import ErAdminClient
+from app.datasource.er_event_types import (
+    EventTypeSpec,
+    build_choice_records,
+    build_event_type_payload,
+    build_event_type_spec,
+    category_value,
+    CHOICE_VALUE_LIMIT,
+    generated_type_prefix,
+    parse_generated_event_type,
+    parse_generated_field_key,
+    plan_field_choices,
+)
 from app.datasource.schemas import (
     CmoreClassification,
     CmoreComment,
@@ -27,11 +44,12 @@ from app.datasource.schemas import (
     UploadType,
 )
 from app.datasource.tag_index import TagIndex, TagIndexData, tag_index, _build_index
-from app.services.activity_logger import activity_logger, log_action_activity
+from app.services.activity_logger import activity_logger, ephemeral_run, log_action_activity
+from app.services.errors import IntegrationConfigurationError
 from app.services.cloud_storage import download_attachment
 from .errors import IntegrationDependencyNotReadyError
 from .state import CmoreStateManager
-from .configurations import AuthenticateConfig, CmoreTagMapping, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
+from .configurations import AuthenticateConfig, CmoreFieldMapping, CmoreTagMapping, CreateErEventTypesConfig, DeliverConfig, ListTagNamesQuery, ListTagFieldsQuery, ListFieldOptionsQuery, ListClassificationValuesQuery
 from .reference_data import ReferenceDataResponse, ReferenceOption
 
 logger = logging.getLogger(__name__)
@@ -457,6 +475,14 @@ def _resolve_field_value(field_info, candidate: str) -> Optional[str]:
             option = lookup.get("value")
             if option is not None and _normalize_for_match(option) == target:
                 return option
+        # A generated EarthRanger choice value is the CMORE option cut to the
+        # Choice.value limit, so a candidate of exactly that length may be a
+        # prefix of the real option. Only then is a prefix match accepted.
+        if len(str(candidate)) == CHOICE_VALUE_LIMIT:
+            for lookup in field_info.lookups or []:
+                option = lookup.get("value")
+                if option is not None and _normalize_for_match(option).startswith(target):
+                    return option
         logger.warning(
             "CMORE field %r (%s) has no option matching %r; dropping value. "
             "Valid options: %s",
@@ -529,8 +555,16 @@ async def _build_event_tag(
     integration_id: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
+    *,
+    convention: bool = False,
 ) -> Tuple[Optional[CmoreEventTag], bool]:
     """Resolve mapping + event_details into a CmoreEventTag.
+
+    With ``convention=True`` the event type was generated from this tag by
+    ``action_create_er_event_types``: ``mapping`` carries only the tag, and
+    the fields come from the event_details keys themselves (``f<fieldid>_…``),
+    with no value mappings. Keys that are not generated field keys on this
+    tag (an operator added a field by hand) are ignored.
 
     Returns ``(tag, reporter_placed)``. ``tag`` is None if the configured tag
     is not found on the C-more instance — the event still gets posted (with
@@ -561,7 +595,15 @@ async def _build_event_tag(
 
     details = event.event_details or {}
     values = []
-    for fm in (mapping.field_mappings or []):
+    field_mappings = list(mapping.field_mappings or [])
+    if convention:
+        field_mappings = [
+            CmoreFieldMapping(event_details_key=key, cmore_field=str(field_id))
+            for key in details
+            for field_id in [parse_generated_field_key(key)]
+            if field_id is not None and field_id in tag_info.fields_by_id
+        ]
+    for fm in field_mappings:
         ed_key = fm.event_details_key
         field_ref = fm.cmore_field
         field_info = tag_info.resolve_field(field_ref)
@@ -714,6 +756,17 @@ async def _push_event(
             None,
         )
 
+    # Generated event types (action_create_er_event_types) carry the CMORE
+    # tag id in their name, qualified by this integration's share group, so
+    # they map by convention with no stored entry. An explicit entry above
+    # always wins; another group's generated type is unmapped here.
+    convention = False
+    if mapping is None and event.event_type:
+        generated_tag_id = parse_generated_event_type(event.event_type, auth.owner_group_id)
+        if generated_tag_id is not None:
+            mapping = CmoreTagMapping(event_type=event.event_type, tag=str(generated_tag_id), field_mappings=[])
+            convention = True
+
     if mapping is None:
         # Guardrail: an event whose type has no "Event type → CMORE tag" entry
         # (or when no entries are configured at all) is NOT posted. Posting it
@@ -744,7 +797,7 @@ async def _push_event(
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None
         tag, reporter_placed = await _build_event_tag(
-            client, auth.base_url, str(integration.id), mapping, event
+            client, auth.base_url, str(integration.id), mapping, event, convention=convention
         )
         if tag is not None:
             tags = [tag]
@@ -1057,6 +1110,316 @@ async def _push_attachment_as_comment(
         "cmore_message_id": cmore_message_id,
         "cmore_response": response,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Create EarthRanger event types from CMORE tags
+# (design: docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md)
+# ---------------------------------------------------------------------------
+
+ER_PROVIDER_TYPE = "earthranger"
+
+# What EarthRanger enforces on the writes this action makes (verified in
+# das): creating the category needs ``activity.add_eventcategory``; once the
+# category exists, event types in it need the per-category permission
+# ``activity.cmore_<group>_update`` (and ``_read`` to list them), which
+# user/me reports under the category value with verbs add/change/view/delete;
+# choices need ``choices.add_choice`` / ``change_choice``, which user/me never
+# lists (only the "activity" app is reported), so those are probed on the
+# endpoint. A superuser passes everything.
+CATEGORY_PERMISSION_VERBS = {"change", "view"}
+
+
+class ErProvider(pydantic.BaseModel):
+    """The connected EarthRanger provider's site and credentials, read from
+    its own Gundi auth configuration."""
+    integration_id: str
+    name: str = ""
+    site_root: str
+    token: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+def _er_site_root(base_url: Optional[str]) -> str:
+    parsed = urlparse(base_url or "")
+    if not (parsed.scheme and parsed.hostname):
+        raise IntegrationConfigurationError(
+            "The EarthRanger provider's site URL is missing or malformed"
+        )
+    return f"{parsed.scheme}://{parsed.hostname}"
+
+
+async def _resolve_er_provider(integration: Integration) -> ErProvider:
+    """The one EarthRanger provider connected to this destination, with its
+    auth config. None or several is a configuration error, not a guess."""
+    async with GundiClient() as gundi:
+        connections = await gundi.get_connections(
+            params={"destination_id": str(integration.id), "provider_type": ER_PROVIDER_TYPE}
+        )
+        provider_ids = []
+        for connection in connections or []:
+            provider_id = str(connection.provider.id)
+            if provider_id not in provider_ids:
+                provider_ids.append(provider_id)
+        if len(provider_ids) != 1:
+            raise IntegrationConfigurationError(
+                "Expected exactly one connected EarthRanger provider, found "
+                f"{len(provider_ids)} EarthRanger provider(s)"
+            )
+        er_integration = await gundi.get_integration_details(provider_ids[0])
+    auth = er_integration.get_action_config("auth")
+    data = dict(auth.data or {}) if auth else {}
+    return ErProvider(
+        integration_id=provider_ids[0],
+        name=er_integration.name or "",
+        site_root=_er_site_root(er_integration.base_url),
+        token=data.get("token") or None,
+        username=data.get("username") or None,
+        password=data.get("password") or None,
+    )
+
+
+def _missing_er_permissions(
+    me: dict,
+    *,
+    group: int,
+    category_exists: bool,
+    can_add_choices: bool,
+    can_change_choices: bool,
+) -> Dict[str, List[str]]:
+    """Required permissions the EarthRanger user lacks, per resource (sorted
+    verbs); {} when the run may proceed."""
+    me = me or {}
+    if me.get("is_superuser"):
+        return {}
+    granted = me.get("permissions") or {}
+    missing: Dict[str, List[str]] = {}
+    if category_exists:
+        category = category_value(group)
+        lacking = sorted(CATEGORY_PERMISSION_VERBS - set(granted.get(category) or []))
+        if lacking:
+            missing[category] = lacking
+    elif "add" not in (granted.get("eventcategory") or []):
+        missing["eventcategory"] = ["add"]
+    choice_missing = [verb for verb, ok in (("add", can_add_choices), ("change", can_change_choices)) if not ok]
+    if choice_missing:
+        missing["choice"] = choice_missing
+    return missing
+
+
+async def _er_preflight(er: ErAdminClient, group: int) -> Tuple[dict, List[dict]]:
+    """Check the EarthRanger user can do what this run needs, before any
+    write. Returns the preflight report and the site's categories (fetched
+    here because the required permissions depend on whether ours exists)."""
+    me = await er.get_me()
+    categories = await er.get_event_categories()
+    category_exists = any(c.get("value") == category_value(group) for c in categories)
+    missing = _missing_er_permissions(
+        me,
+        group=group,
+        category_exists=category_exists,
+        can_add_choices=await er.can_add_choices(),
+        can_change_choices=await er.can_change_choices(),
+    )
+    username = (me or {}).get("username") or "<unknown>"
+    if missing:
+        detail = "; ".join(f"{resource}: {', '.join(verbs)}" for resource, verbs in sorted(missing.items()))
+        raise IntegrationConfigurationError(
+            f"EarthRanger user {username!r} lacks permissions: {detail}"
+        )
+    return {"username": username, "permissions_ok": True}, categories
+
+
+def _raw_tags_by_id(raw_response: list) -> Dict[int, dict]:
+    """The raw ``/v2/tags/getfull`` tag entries keyed by id. The builder
+    needs the raw shape (lookups, hints, isMandatory), not TagInfo."""
+    return {
+        int(tag["id"]): tag
+        for domain in raw_response or []
+        for tag in domain.get("tags") or []
+        if tag.get("id") is not None
+    }
+
+
+def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
+    """Each configured tag ref (id or exact name) → its raw tag entry.
+    Any unknown ref fails the whole run before anything is written."""
+    index = _build_index(raw_response)
+    by_id = _raw_tags_by_id(raw_response)
+    resolved: List[dict] = []
+    unknown: List[str] = []
+    for ref in refs:
+        tag_info = index.resolve(ref)
+        if tag_info is None or tag_info.id not in by_id:
+            unknown.append(str(ref))
+            continue
+        if not any(t["id"] == tag_info.id for t in resolved):
+            resolved.append(by_id[tag_info.id])
+    if unknown:
+        raise IntegrationConfigurationError(
+            f"{len(unknown)} configured CMORE tag(s) not found on this instance"
+        )
+    return resolved
+
+
+def _existing_generated_types(existing: List[dict], group: int, specs: List[EventTypeSpec]) -> Dict[int, dict]:
+    """Per CMORE tag id, the EarthRanger event type that already carries its
+    id prefix, with the existing field key for each CMORE field id. Matched
+    by prefix, never by slug, so renames reuse the object (Decision 6)."""
+    found: Dict[int, dict] = {}
+    for spec in specs:
+        prefix = generated_type_prefix(group, spec.cmore_tag_id)
+        bare = prefix.rstrip("_")
+        for et in existing or []:
+            value = str(et.get("value") or "")
+            if value == bare or value.startswith(prefix):
+                properties = ((et.get("schema") or {}).get("json") or {}).get("properties") or {}
+                keys = {}
+                for key in properties:
+                    field_id = parse_generated_field_key(key)
+                    if field_id is not None and field_id not in keys:
+                        keys[field_id] = key
+                found[spec.cmore_tag_id] = {"value": value, "keys": keys}
+                break
+    return found
+
+
+async def _ensure_category(
+    er: ErAdminClient, group: int, label: Optional[str], dry_run: bool, categories: List[dict]
+) -> dict:
+    value = category_value(group)
+    display = ((label or "").strip() or f"CMORE group {group}")[:100]
+    for category in categories:
+        if category.get("value") == value:
+            return {"value": value, "display": category.get("display") or display, "action": "unchanged"}
+    if not dry_run:
+        await er.post_event_category({"value": value, "display": display, "is_active": True})
+    return {"value": value, "display": display, "action": "created"}
+
+
+async def _apply_choices(er: ErAdminClient, records_by_field: Dict[str, List[dict]], dry_run: bool, counts: dict) -> None:
+    for field_key_name, desired in records_by_field.items():
+        existing = await er.get_choices(field_key_name)
+        for op in plan_field_choices(existing, desired):
+            if op.action == "unchanged":
+                continue
+            counts[{"create": "created", "update": "updated", "deactivate": "deactivated"}[op.action]] += 1
+            if dry_run:
+                continue
+            if op.action == "create":
+                await er.post_choice(op.payload)
+            else:
+                await er.patch_choice(op.choice_id, op.payload)
+
+
+@activity_logger()
+async def action_create_er_event_types(
+    integration: Integration, action_config: CreateErEventTypesConfig
+) -> dict:
+    """Create or update one EarthRanger event type (and choice lists) per
+    selected CMORE tag, on the EarthRanger provider connected to this
+    destination. Generated types are delivered by naming convention, so
+    they need no event_type_to_tag entry. Every step is idempotent; a run
+    that fails part-way can simply be re-run."""
+    if ephemeral_run.get():
+        raise IntegrationConfigurationError(
+            "This action writes to EarthRanger and only runs on a saved integration"
+        )
+    auth = _get_auth_config(integration)
+    group = int(auth.owner_group_id)
+    dry_run = action_config.dry_run
+
+    async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as cmore:
+        raw_tags = _resolve_tag_refs(action_config.tags, await cmore.get_tags())
+    specs = [build_event_type_spec(raw, group) for raw in raw_tags]
+
+    provider = await _resolve_er_provider(integration)
+    async with ErAdminClient(
+        provider.site_root, token=provider.token, username=provider.username, password=provider.password
+    ) as er:
+        preflight, categories = await _er_preflight(er, group)
+        existing = _existing_generated_types(await er.get_event_types(), group, specs)
+        category = await _ensure_category(er, group, action_config.share_group_label, dry_run, categories)
+
+        counts = {"created": 0, "updated": 0, "deactivated": 0}
+        reported: List[dict] = []
+        for spec in specs:
+            prior = existing.get(spec.cmore_tag_id)
+            existing_value = prior["value"] if prior else None
+            existing_keys = prior["keys"] if prior else {}
+            payload = build_event_type_payload(spec, existing_value=existing_value, existing_keys=existing_keys)
+            try:
+                if not dry_run:
+                    if prior:
+                        await er.patch_event_type(existing_value, payload)
+                    else:
+                        await er.post_event_type(payload)
+                await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
+            except Exception as exc:
+                # Every step is idempotent, so a re-run finishes the rest; the
+                # operator still needs to see how far this run got.
+                await log_action_activity(
+                    integration_id=str(integration.id),
+                    action_id="create_er_event_types",
+                    title=f"Creating EarthRanger event types stopped at {spec.display}",
+                    level=LogLevel.ERROR,
+                    data={
+                        "earthranger_site": provider.site_root,
+                        "category": category,
+                        "event_types_completed": reported,
+                        "failed_event_type": payload["value"],
+                        "choices": counts,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code == 403:
+                    raise IntegrationConfigurationError(
+                        f"EarthRanger refused a write (HTTP 403): user {preflight['username']!r} lacks a "
+                        "permission the preflight could not see; grant it and run again"
+                    ) from exc
+                raise
+            reported.append({
+                "value": payload["value"],
+                "display": spec.display,
+                "action": "updated" if prior else "created",
+                "fields": len(spec.fields),
+                "skipped": [f.dict() for f in spec.skipped],
+                "shallow_fields": [f.dict() for f in spec.shallow_fields],
+            })
+
+    result = {
+        "earthranger": {"site": provider.site_root, **preflight},
+        "category": category,
+        "event_types": reported,
+        "choices": counts,
+        "dry_run": dry_run,
+    }
+    await log_action_activity(
+        integration_id=str(integration.id),
+        action_id="create_er_event_types",
+        title=("Previewed" if dry_run else "Created") + " EarthRanger event types from CMORE tags",
+        level=LogLevel.INFO,
+        data={
+            "earthranger_site": provider.site_root,
+            "category": category["value"],
+            "event_types": len(reported),
+            "choices": counts,
+            "dry_run": dry_run,
+        },
+    )
+    for et in reported:
+        if et["skipped"]:
+            await log_action_activity(
+                integration_id=str(integration.id),
+                action_id="create_er_event_types",
+                title=f"Fields skipped on {et['display']}",
+                level=LogLevel.WARNING,
+                data={"event_type": et["value"], "skipped": et["skipped"], "shallow_fields": et["shallow_fields"]},
+            )
+    return result
 
 
 @activity_logger()

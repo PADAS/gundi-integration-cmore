@@ -146,3 +146,26 @@ def test_reported_by_field_offers_the_tag_fields_of_its_sibling_tag():
     assert ref["target"] == "self"
     assert ref["params"] == {"tag": {"$data": "tag"}}
     assert "ui:widget" not in node
+
+
+def test_create_er_event_types_config_fields_and_order():
+    from app.actions.configurations import CreateErEventTypesConfig, _reference
+    from app.actions.core import ExecutableActionMixin, GenericActionConfiguration
+
+    assert issubclass(CreateErEventTypesConfig, GenericActionConfiguration)
+    assert issubclass(CreateErEventTypesConfig, ExecutableActionMixin)
+    ui = CreateErEventTypesConfig.ui_schema()
+    assert ui["ui:order"] == ["tags", "share_group_label", "dry_run"]
+    assert ui["tags"]["items"]["gundi:reference"] == _reference("list_tag_names")
+    assert "ui:widget" not in ui["tags"]["items"]
+
+
+def test_create_er_event_types_config_requires_tags():
+    import pydantic
+    import pytest
+    from app.actions.configurations import CreateErEventTypesConfig
+
+    with pytest.raises(pydantic.ValidationError):
+        CreateErEventTypesConfig(tags=[])
+    cfg = CreateErEventTypesConfig(tags=["20"])
+    assert cfg.dry_run is False and cfg.share_group_label is None

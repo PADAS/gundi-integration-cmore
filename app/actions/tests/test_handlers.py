@@ -1719,3 +1719,198 @@ async def test_action_auth_reports_invalid_credentials_on_error(mocker, integrat
 
     assert result["valid_credentials"] is False
     assert "401" in result["error"]
+
+
+# ----- delivery by naming convention (generated event types) -----
+
+
+def _generated_tag_info(long_option=None):
+    """TagInfo for CMORE tag 20 as the generator would have mirrored it."""
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    lookups = [{"value": "Camp"}, {"value": "Bait Collection"}]
+    if long_option:
+        lookups.append({"value": long_option})
+    return TagInfo.build(
+        id=20, name="Evidence of Poacher", domain="Wildlife", type_limiter="Incident",
+        fields=[
+            FieldInfo(id=260, name="Reported By", data_type="String"),
+            FieldInfo(id=261, name="Evidence Type", data_type="Lookup", allow_multiple=True, lookups=lookups),
+            FieldInfo(id=264, name="Number of Snares Found", data_type="Number"),
+        ],
+    )
+
+
+def _patch_tag_index_recording(mocker, returning):
+    """Like _patch_tag_index, but records the tag ref each lookup asked for."""
+    from app.actions import handlers as handlers_module
+
+    refs = []
+
+    async def _async_get(client, base_url, integration_id, ref, *args, **kwargs):
+        refs.append(ref)
+        return returning
+
+    mocker.patch.object(handlers_module.tag_index, "get", side_effect=_async_get)
+    return refs
+
+
+GENERATED_TYPE = "cmore_7932_20_evidence_of_poacher"  # fixture owner_group_id is 7932
+
+
+@pytest.mark.asyncio
+async def test_generated_type_delivers_by_convention_without_a_mapping(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    activity_log = _patch_activity_logger(mocker)
+    refs = _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"f261_evidence_type": ["Camp", "Bait Collection"], "f264_number_of_snares_found": 3}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_awaited_once()
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags[0].tagId == 20
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(261, "Camp"), (261, "Bait Collection"), (264, "3")]
+    assert refs == ["20"]
+    assert result["event_posted"] is True
+    activity_log.assert_not_awaited()  # not a skip
+
+
+@pytest.mark.asyncio
+async def test_generated_type_for_another_group_is_skipped_as_unmapped(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = "cmore_7933_20_evidence_of_poacher"
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    result = await action_deliver(integration, deliver_config, delivery, metadata)
+
+    inner.post_event.assert_not_awaited()
+    assert result == {"dropped": True, "reason": "event_type_not_mapped"}
+
+
+@pytest.mark.asyncio
+async def test_explicit_mapping_for_a_generated_type_wins(
+    mocker, integration, provider_info, event, metadata, fake_tag_info
+):
+    from app.actions.configurations import CmoreFieldMapping, CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    refs = _patch_tag_index_recording(mocker, fake_tag_info)  # tag 42
+
+    config = DeliverConfig(event_type_to_tag=[CmoreTagMapping(
+        event_type=GENERATED_TYPE, tag="42",
+        field_mappings=[CmoreFieldMapping(event_details_key="species", cmore_field="101")],
+    )])
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"species": "lion", "f264_number_of_snares_found": 3}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert refs == ["42"]
+    assert posted.tags[0].tagId == 42
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(101, "lion")]
+
+
+@pytest.mark.asyncio
+async def test_unknown_keys_on_a_generated_type_are_ignored(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"notes": "added by hand", "f999_not_on_tag": "x", "f264_number_of_snares_found": 2}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(264, "2")]
+
+
+@pytest.mark.asyncio
+async def test_truncated_choice_value_still_resolves(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """The ER choice value is the CMORE option cut to 100 chars; delivering
+    it must resolve to the full CMORE option."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    long_option = "x" * 120
+    _patch_tag_index_recording(mocker, _generated_tag_info(long_option=long_option))
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"f261_evidence_type": ["x" * 100]}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(261, long_option)]
+
+
+@pytest.mark.asyncio
+async def test_reporter_field_still_applies_on_convention_path(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"f264_number_of_snares_found": 1}
+    event.provider_metadata = {"reported_by": "Jane"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert (260, "Jane") in [(v.fieldId, v.value) for v in posted.tags[0].values]
+    assert all("Reported by" not in c for c in _source_comments(inner))
+
+
+@pytest.mark.asyncio
+async def test_slugged_choice_value_resolves_to_the_cmore_option(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """Generated ER choice values are slugs ("bait_collection"); delivery
+    resolves them to the CMORE option text ("Bait Collection")."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"f261_evidence_type": ["bait_collection", "camp"]}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(261, "Bait Collection"), (261, "Camp")]
