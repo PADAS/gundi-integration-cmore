@@ -1247,10 +1247,9 @@ def _raw_tags_by_id(raw_response: list) -> Dict[int, dict]:
     }
 
 
-def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
+def _resolve_tag_refs(refs: List[str], raw_response: list, index: TagIndexData) -> List[dict]:
     """Each configured tag ref (id or exact name) → its raw tag entry.
     Any unknown ref fails the whole run before anything is written."""
-    index = _build_index(raw_response)
     by_id = _raw_tags_by_id(raw_response)
     resolved: List[dict] = []
     unknown: List[str] = []
@@ -1269,23 +1268,32 @@ def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
 
 
 def _hand_mapped_event_types(integration: Integration, index: TagIndexData, group: int) -> Dict[int, List[str]]:
-    """Per CMORE tag id, the hand-built EarthRanger event types the saved
-    Deliver config already maps to it (sorted). Entries that name one of this
-    group's generated types are not hand-built and are left out; tag refs
-    that do not resolve are ignored."""
+    """Per CMORE tag id, the event types the saved Deliver config routes to it
+    by an explicit entry (sorted), read the way delivery reads them: through
+    DeliverConfig, and only the first entry per event type. An entry for one
+    of this group's generated types counts only when it routes that type to
+    a tag other than its own (delivery lets the explicit entry win). Tag refs
+    that do not resolve are ignored; an invalid Deliver config yields none."""
     deliver = integration.get_action_config("deliver")
-    entries = ((deliver.data or {}).get("event_type_to_tag") or []) if deliver else []
+    if not deliver or not deliver.data:
+        return {}
+    try:
+        mappings = DeliverConfig.parse_obj(deliver.data).event_type_to_tag or []
+    except pydantic.ValidationError:
+        logger.warning("Saved Deliver config does not validate; skipping the hand-mapping overlap check.")
+        return {}
     found: Dict[int, set] = {}
-    for entry in entries:
-        if not isinstance(entry, dict):
+    seen_event_types = set()
+    for mapping in mappings:
+        if mapping.event_type in seen_event_types:
+            continue  # delivery uses the first entry per event type
+        seen_event_types.add(mapping.event_type)
+        tag_info = index.resolve(mapping.tag)
+        if tag_info is None:
             continue
-        event_type = entry.get("event_type")
-        tag_info = index.resolve(str(entry.get("tag") or ""))
-        if not event_type or tag_info is None:
-            continue
-        if parse_generated_event_type(event_type, group) is not None:
-            continue
-        found.setdefault(tag_info.id, set()).add(event_type)
+        if parse_generated_event_type(mapping.event_type, group) == tag_info.id:
+            continue  # the generated type mapped to its own tag is not an overlap
+        found.setdefault(tag_info.id, set()).add(mapping.event_type)
     return {tag_id: sorted(types) for tag_id, types in found.items()}
 
 
@@ -1373,12 +1381,13 @@ async def action_create_er_event_types(
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as cmore:
         raw_response = await cmore.get_tags()
-    raw_tags = _resolve_tag_refs(action_config.tags, raw_response)
+    tag_index_data = _build_index(raw_response)
+    raw_tags = _resolve_tag_refs(action_config.tags, raw_response, tag_index_data)
     specs = [build_event_type_spec(raw, group) for raw in raw_tags]
     # Tags already mapped from a hand-built ER type are still generated; the
-    # result and the activity log name the existing types so the operator can
-    # decide which one rangers should use.
-    hand_mapped = _hand_mapped_event_types(integration, _build_index(raw_response), group)
+    # result names the existing types so the operator can decide which one
+    # rangers should use, and the activity log warns when a second type appears.
+    hand_mapped = _hand_mapped_event_types(integration, tag_index_data, group)
 
     provider = await _resolve_er_provider(integration)
     async with ErAdminClient(
@@ -1457,7 +1466,7 @@ async def action_create_er_event_types(
         },
     )
     for et in reported:
-        if et["mapped_by_hand"]:
+        if et["mapped_by_hand"] and et["action"] == "created" and not dry_run:
             await log_action_activity(
                 integration_id=str(integration.id),
                 action_id="create_er_event_types",

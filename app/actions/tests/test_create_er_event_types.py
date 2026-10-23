@@ -510,3 +510,49 @@ async def test_an_explicit_mapping_for_the_generated_type_is_not_an_overlap(
 async def test_no_deliver_config_means_no_overlap(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
     result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
     assert result["event_types"][0]["mapped_by_hand"] == []
+
+
+
+@pytest.mark.asyncio
+async def test_only_the_entry_delivery_uses_counts_as_an_overlap(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """Delivery uses the first event_type_to_tag entry per event type; a later
+    duplicate never routes anything, so it is not an overlap."""
+    integration = _with_deliver_mappings(integration, [
+        {"event_type": "snare_found", "tag": "43"},
+        {"event_type": "snare_found", "tag": "20"},
+    ])
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    assert result["event_types"][0]["mapped_by_hand"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_generated_type_routed_to_another_tag_counts_as_an_overlap(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """An explicit entry wins over the naming convention, so a generated type
+    mapped by hand to a different tag does land events on that tag."""
+    integration = _with_deliver_mappings(integration, [
+        {"event_type": "cmore_7932_20_evidence_of_poacher", "tag": "43"},
+    ])
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["43"], dry_run=True))
+    assert result["event_types"][0]["mapped_by_hand"] == ["cmore_7932_20_evidence_of_poacher"]
+
+
+@pytest.mark.asyncio
+async def test_overlap_warning_is_logged_only_when_the_type_is_created(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """Preview and re-runs report the overlap in the result only; the
+    activity-log warning is written once, when the second type appears."""
+    integration = _with_deliver_mappings(integration, [{"event_type": "poacher_evidence", "tag": "20"}])
+
+    def overlap_warnings():
+        return [c for c in activity_log.await_args_list if "already mapped" in c.kwargs.get("title", "")]
+
+    preview = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    assert preview["event_types"][0]["mapped_by_hand"] == ["poacher_evidence"]
+    assert overlap_warnings() == []
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_existing_type()]
+    rerun = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    assert rerun["event_types"][0]["action"] == "updated"
+    assert rerun["event_types"][0]["mapped_by_hand"] == ["poacher_evidence"]
+    assert overlap_warnings() == []

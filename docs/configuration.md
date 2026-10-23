@@ -287,9 +287,12 @@ entry for an event type you built yourself, the action still creates the
 generated type, so EarthRanger then has two types for that tag. Both deliver
 correctly: your hand-built type keeps its explicit mapping, and the generated
 one maps by convention. The result lists the existing types under
-`mapped_by_hand`, and the activity log warns *"<tag> is already mapped from
-<type>; rangers will see both types"*. Run **Preview only** first to see these,
-then either leave the tag out or retire the hand-built type in EarthRanger.
+`mapped_by_hand` on every run, Preview only included; the activity log warns
+*"<tag> is already mapped from <type>; rangers will see both types"* once, on
+the run that creates the second type. The check reads your mappings the way
+delivery does (the first entry per event type). Run **Preview only** first to
+see these, then either leave the tag out or retire the hand-built type in
+EarthRanger.
 
 ### Naming convention
 
