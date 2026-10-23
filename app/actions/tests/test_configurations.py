@@ -193,3 +193,26 @@ def test_create_er_event_types_has_a_readable_title():
     from app.actions import handlers
 
     assert getattr(handlers.action_create_er_event_types, "action_title", None) == "Create EarthRanger event types"
+
+
+
+def _model_descriptions(schema):
+    """Model-level descriptions in a schema and its nested definitions
+    (field descriptions are user-facing help text and are not collected)."""
+    found = {"<root>": schema.get("description")}
+    for name, definition in (schema.get("definitions") or {}).items():
+        found[name] = definition.get("description")
+    return {k: v for k, v in found.items() if v}
+
+
+def test_no_action_schema_carries_a_docstring_description_anywhere():
+    """Every action's registered schema, nested definitions included, is free
+    of docstring-derived descriptions. Only a model that declares a
+    portal_description shows one, and it is that text."""
+    from app.actions.configurations import CreateErEventTypesConfig
+    from app.actions.core import discover_actions
+
+    for action_id, (_, model, _) in discover_actions("app.actions.handlers", "action_").items():
+        descriptions = _model_descriptions(model.schema())
+        expected = {"<root>": CreateErEventTypesConfig.portal_description} if model is CreateErEventTypesConfig else {}
+        assert descriptions == expected, action_id
