@@ -72,6 +72,51 @@ untagged events. The entry's data carries `event_type`, `serial_number`,
   mappings is enough to let it through), then re-send the event from
   EarthRanger; the skipped event is not retried.
 
+## Create EarthRanger event types can't find the EarthRanger site
+
+```
+Expected exactly one connected EarthRanger provider, found 0 EarthRanger provider(s)
+```
+
+The action looks up the Gundi connections whose destination is this CMORE
+integration and keeps the EarthRanger providers. Zero means no EarthRanger
+provider is routed to this destination yet (create the connection in the Gundi
+portal first); two or more means the action can't tell which site to write to
+— run it from a CMORE integration that has exactly one EarthRanger provider,
+or split the integrations per site.
+
+`The EarthRanger provider's site URL is missing or malformed` means the
+provider's Gundi **base URL** lacks a scheme or host (it should look like
+`https://<site>.pamdas.org`).
+
+## The EarthRanger user lacks permissions
+
+```
+EarthRanger user 'lapalala-gundi' lacks permissions: choice: add, change; eventcategory: add; eventtype: add, change
+```
+
+The connected EarthRanger provider's user is usually a data-ingest account.
+Creating categories, event types and choices needs the listed permissions.
+Grant them on the EarthRanger site (Admin → Users → the user's permission
+sets) and run the action again. **Preview only** performs this check without
+writing, so run it before the day you need the types.
+
+## A field is missing from a generated event type
+
+The action result and the activity log (`Fields skipped on <tag>`) list what
+was left out and why:
+
+- `skipped` — `filled from the EarthRanger reporter` (a *Reported by*
+  property; the connector sets it from the EarthRanger reporter, see
+  [The reporter isn't shown](#the-reporter-isnt-shown-on-the-cmore-event)) or
+  `unsupported data type Media|Message` (no EarthRanger equivalent).
+- `shallow_fields` — a lookup whose options have nested children. Only the
+  top level is offered until the EarthRanger API can create sub-choices.
+
+A property you add to the generated type by hand is kept but ignored at
+delivery; put the value in a CMORE property through an explicit
+[field mapping](configuration.md#event-type--cmore-tag-event_type_to_tag) instead.
+
 ## Nothing reaches the runner at all
 
 - **`broker_config.topic` not set** on the destination integration. Without it,

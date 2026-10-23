@@ -60,8 +60,10 @@ live under the single Deliver config.
 ### Event type → CMORE tag (`event_type_to_tag`)
 
 List mapping each Gundi `event_type` to a CMORE tag and its fields. **Only
-event types in this list are sent to CMORE.** An event whose type isn't listed
-(or any event, while the list is empty) is skipped and recorded in the
+event types in this list are sent to CMORE** — plus event types the connector
+itself generated with [Create EarthRanger event types](#create-earthranger-event-types),
+which map by naming convention and need no entry here. An event whose type
+isn't listed (or any event, while the list is empty) is skipped and recorded in the
 connection's activity log as a warning — *No CMORE tag mapping for event type
 '…' — skipping event* — with the event type, EarthRanger serial number and the
 list of configured types. A tag entry with no field mappings still counts as
@@ -230,6 +232,91 @@ deduped by value**:
   provider's label is shown (cosmetic only — the stored value is always the
   slug). If they define the same slug with *different schemas*, the field and
   value lists are the union of both definitions.
+
+## Create EarthRanger event types
+
+The fastest way to get a reserve reporting into CMORE is to let the connector
+build the EarthRanger side from the CMORE tags. The **Create EarthRanger event
+types** action (on the CMORE integration's page in the Gundi portal, with a
+Run button) takes the CMORE tags you pick and, on the EarthRanger site
+connected to this destination, creates:
+
+- one **event category** for this share group,
+- one **event type per tag**, with a field per CMORE property, and
+- one **choice list** per lookup property, holding the CMORE options.
+
+Events reported with these types deliver to CMORE with the tag and every
+mapped field filled, **with no `event_type_to_tag` entry**: the names carry
+the ids the connector needs.
+
+### The form
+
+- **CMORE tags** — the tags to turn into event types, by ID (preferred) or
+  exact name; the dropdown is the same one the mapping list uses.
+- **Share group label** (optional) — display name of the EarthRanger category,
+  e.g. the reserve's name. Default `CMORE group <Owner Group ID>`. Only used
+  when the category is first created.
+- **Preview only** — checks the EarthRanger connection and permissions and
+  reports what would be created or updated, without writing. Run this first.
+
+### What it needs
+
+- Exactly **one EarthRanger provider** connected to this CMORE destination in
+  Gundi. None or several stops the action with
+  `Expected exactly one connected EarthRanger provider, found N …`.
+- That provider's EarthRanger user must be able to manage event types. The
+  action checks `user/me` before writing and refuses with
+  `EarthRanger user '<name>' lacks permissions: …` naming what is missing:
+  `eventcategory: add`, `eventtype: add, change`, `choice: add, change`. Grant
+  them on the EarthRanger site (Admin → Users → permission sets).
+- A saved integration: the action does not run on a draft.
+
+### Naming convention
+
+| Object | Value | Example |
+|---|---|---|
+| Category | `cmore_<group>` | `cmore_7932` |
+| Event type | `cmore_<group>_<tagid>_<slug>` | `cmore_7932_20_evidence_of_poacher` |
+| Field key | `f<fieldid>_<slug>` | `f261_evidence_type` |
+| Choice value | the CMORE option text | `Abalone Harvesting` |
+
+`<group>` is this integration's **Owner Group ID**, so one EarthRanger site
+can serve several CMORE share groups: each CMORE integration delivers only
+the types that carry *its* group and skips the others as unmapped. The slug
+is cosmetic; on a re-run existing objects are matched by the id prefix, so a
+CMORE rename updates the display name but never creates a second type or
+field. Nothing in EarthRanger is ever deleted: deselected tags are left
+alone and dropped options are deactivated.
+
+### Field translation
+
+| CMORE | EarthRanger |
+|---|---|
+| String, IDNumber | text |
+| Text | multi-line text |
+| Number, Duration | number |
+| Boolean | checkbox |
+| DateTime | date/time |
+| Lookup, FixedLookup | select, or multiselect when the tag allows multiple values |
+| Media, Message | skipped |
+
+Two more rules: a property named **Reported by** is skipped, because the
+connector fills it from the EarthRanger reporter (see
+[Who reported the event](#who-reported-the-event)); and a lookup whose options
+have **nested children** (e.g. *Animal* → Hoof Animal → Buffalo) is offered at
+its **top level only** for now — the EarthRanger API cannot create sub-choices
+yet. Both are listed in the action result (`skipped`, `shallow_fields`) and in
+the activity log.
+
+### Delivery
+
+For an event whose type has no `event_type_to_tag` entry, the connector checks
+whether the type is one of its generated ones (`cmore_<group>_<tagid>_…` with
+its own group). If so, the tag comes from `<tagid>`, each `f<fieldid>_…` key in
+`event_details` goes to that field, and lookup values are matched to the
+CMORE options by text. Keys that are not generated field keys (a field you
+added to the type by hand) are ignored. An explicit mapping entry for a
+generated type always wins over the convention.
 
 ## Scaffolding mappings (CLI alternative)
 
