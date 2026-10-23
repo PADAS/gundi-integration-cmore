@@ -1268,6 +1268,21 @@ def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
     return resolved
 
 
+def _schema_dict(schema) -> dict:
+    """An event type's schema as a dict. EarthRanger's v2 listing returns it
+    as a JSON string; anything unparseable reads as empty, so the type is
+    treated as having no generated fields rather than failing the run."""
+    if isinstance(schema, dict):
+        return schema
+    if isinstance(schema, str):
+        try:
+            parsed = json.loads(schema)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _existing_generated_types(existing: List[dict], group: int, specs: List[EventTypeSpec]) -> Dict[int, dict]:
     """Per CMORE tag id, the EarthRanger event type that already carries its
     id prefix, with the existing field key for each CMORE field id. Matched
@@ -1279,7 +1294,7 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
         for et in existing or []:
             value = str(et.get("value") or "")
             if value == bare or value.startswith(prefix):
-                properties = ((et.get("schema") or {}).get("json") or {}).get("properties") or {}
+                properties = (_schema_dict(et.get("schema")).get("json") or {}).get("properties") or {}
                 keys = {}
                 for key in properties:
                     field_id = parse_generated_field_key(key)

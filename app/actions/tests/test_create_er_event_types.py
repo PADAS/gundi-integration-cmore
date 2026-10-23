@@ -397,6 +397,29 @@ async def test_second_run_patches_the_existing_type_and_leaves_choices(integrati
 
 
 @pytest.mark.asyncio
+async def test_second_run_reads_the_schema_earthranger_returns_as_a_json_string(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """EarthRanger's v2 listing returns `schema` as a JSON string, not an
+    object (seen on dev 2026-10-23: the re-run failed with AttributeError
+    'str' object has no attribute 'get'). Existing field keys must still be
+    found so the re-run patches in place."""
+    import json as _json
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    existing = _existing_type()
+    existing["schema"] = _json.dumps(existing["schema"], indent=2)
+    mock_er_admin.get_event_types.return_value = [existing, {"value": "rhino_carcass", "schema": "not json"}]
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.post_event_type.assert_not_awaited()
+    value, payload = mock_er_admin.patch_event_type.await_args.args
+    assert value == "cmore_7932_20_old_name"
+    assert "f261_old_key" in payload["schema"]["json"]["properties"]
+    assert result["event_types"][0]["action"] == "updated"
+
+
+@pytest.mark.asyncio
 async def test_existing_category_is_not_rewritten(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
     mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "Old"}]
     mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
