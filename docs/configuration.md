@@ -96,9 +96,11 @@ subject (its name) on the event's **Reported by** — into the event itself:
    written there. If it is blank, the connector uses the first field on the
    tag whose name is *Reported by* (any case) — most CMORE tag domains define
    one, so this usually needs no configuration.
-2. **Source comment.** When the tag has no such field (or the configured one
-   does not resolve, which is logged), the name is appended to the source
-   comment instead: `EarthRanger event #267 — Reported by: Jane Doe — Source: <url>`.
+2. **Source comment.** When the tag has no such field, the configured one
+   does not resolve, or a **Field Mapping** already fills that field from
+   `event_details` (the explicit mapping wins; both cases are logged), the
+   name is appended to the source comment instead:
+   `EarthRanger event #267 — Reported by: Jane Doe — Source: <url>`.
 
 The reporter arrives via `provider_metadata.reported_by`, stamped by the
 EarthRanger runner (gundi-integration-earthranger #54 or later). An older
