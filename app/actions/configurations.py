@@ -157,6 +157,17 @@ class CmoreTagMapping(pydantic.BaseModel):
             "sent as a string."
         ),
     )
+    reported_by_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Reported by field",
+        description=(
+            "CMORE field (by id or name, within the chosen tag) that receives "
+            "the name of the person or subject who reported the event in "
+            "EarthRanger. Leave blank to use a field on the tag named "
+            "\"Reported by\" automatically. When the tag has no such field the "
+            "reporter is added to the event's source comment instead."
+        ),
+    )
 
 
 class SubjectAffiliationMapping(pydantic.BaseModel):
@@ -320,6 +331,15 @@ class DeliverConfig(PushActionConfiguration):
                             "ShareGroup."
                         ),
                     },
+                    "reported_by_field": {
+                        "ui:placeholder": "blank = the tag's \"Reported by\" field",
+                        "ui:help": (
+                            "Field ID (preferred) or exact field name within "
+                            "the tag. Blank auto-matches a field named "
+                            "\"Reported by\"; otherwise the reporter goes into "
+                            "the source comment."
+                        ),
+                    },
                     "field_mappings": {
                         "items": {
                             "ui:order": list(CmoreFieldMapping.__fields__),
@@ -357,6 +377,11 @@ class DeliverConfig(PushActionConfiguration):
         # Reference-data annotations (inert until the portal supports them).
         event_items = base["event_type_to_tag"]["items"]
         event_items["tag"]["gundi:reference"] = _reference("list_tag_names")
+        # The reporter field lives next to the tag it belongs to, so the
+        # cascade is a bare sibling reference.
+        event_items["reported_by_field"]["gundi:reference"] = _reference(
+            "list_tag_fields", {"tag": {"$data": "tag"}}
+        )
         field_items = event_items["field_mappings"]["items"]
         field_items["cmore_field"]["gundi:reference"] = _reference(
             "list_tag_fields", {"tag": {"$data": "../../tag"}}

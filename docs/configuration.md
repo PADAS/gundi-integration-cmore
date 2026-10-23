@@ -81,6 +81,30 @@ Each entry (**CmoreTagMapping**):
 - **Field Mappings** — list of **CmoreFieldMapping**:
   - **Gundi event_details key** → **CMORE Field** (field ID preferred, or exact field name — within the chosen tag).
   - **Value Mappings** (optional) — list of `source value → CMORE value` pairs.
+- **Reported by field** (optional) — the CMORE field, within the chosen tag,
+  that receives the name of the EarthRanger user or subject who reported the
+  event. See [Who reported the event](#who-reported-the-event).
+
+#### Who reported the event
+
+CMORE records every synced event as created by the integration account; the
+API offers no way to post as someone else. The connector therefore carries the
+original reporter — the EarthRanger user (first and last name, or username) or
+subject (its name) on the event's **Reported by** — into the event itself:
+
+1. **Tag field.** If **Reported by field** is set and resolves, the name is
+   written there. If it is blank, the connector uses the first field on the
+   tag whose name is *Reported by* (any case) — most CMORE tag domains define
+   one, so this usually needs no configuration.
+2. **Source comment.** When the tag has no such field, the configured one
+   does not resolve, or a **Field Mapping** already fills that field from
+   `event_details` (the explicit mapping wins; both cases are logged), the
+   name is appended to the source comment instead:
+   `EarthRanger event #267 — Reported by: Jane Doe — Source: <url>`.
+
+The reporter arrives via `provider_metadata.reported_by`, stamped by the
+EarthRanger runner (gundi-integration-earthranger #54 or later). An older
+runner sends nothing, and the event posts exactly as before.
 
 #### How tag and field refs are resolved
 

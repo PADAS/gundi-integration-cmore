@@ -383,6 +383,189 @@ async def test_event_without_event_type_is_skipped_with_missing_type_reason(
     assert "no event type" in log_kwargs["title"]
 
 
+def _tag_with_reported_by(field_name="Reported by"):
+    """TagInfo with Species plus a free-text reporter field named ``field_name``."""
+    from app.datasource.tag_index import FieldInfo, TagInfo
+
+    return TagInfo.build(
+        id=42, name="Wildlife Sighting", domain="Wildlife", type_limiter="Incident",
+        fields=[
+            FieldInfo(id=101, name="Species", data_type="String"),
+            FieldInfo(id=103, name=field_name, data_type="String"),
+        ],
+    )
+
+
+def _values_by_field(posted):
+    return {v.fieldId: v.value for v in posted.tags[0].values}
+
+
+def _source_comments(inner):
+    return [c.args[0].description for c in inner.post_comment.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_reporter_goes_into_the_explicitly_configured_tag_field(
+    mocker, integration, provider_info, event, metadata
+):
+    """reported_by_field names the CMORE field; the reporter lands there as a
+    tag value and is NOT repeated in the source comment."""
+    from app.actions.configurations import CmoreFieldMapping, CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=_tag_with_reported_by("Observer"))
+
+    config = DeliverConfig(event_type_to_tag=[CmoreTagMapping(
+        event_type="lion_sighting", tag="42", reported_by_field="103",
+        field_mappings=[CmoreFieldMapping(event_details_key="species", cmore_field="101")],
+    )])
+    event.provider_metadata = {"serial_number": 267, "reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert _values_by_field(posted) == {101: "lion", 103: "Jane Doe"}
+    assert _source_comments(inner) == ["EarthRanger event #267"]
+
+
+@pytest.mark.asyncio
+async def test_reporter_auto_matches_a_tag_field_named_reported_by(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """No reported_by_field configured: a field on the tag named "Reported by"
+    (any case) takes the reporter."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=_tag_with_reported_by("Reported By"))
+
+    event.provider_metadata = {"reported_by": "Ranger Unit 4"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert _values_by_field(posted)[103] == "Ranger Unit 4"
+    assert all("Reported by" not in c for c in _source_comments(inner))
+
+
+@pytest.mark.asyncio
+async def test_reporter_falls_back_to_the_source_comment_when_the_tag_has_no_field(
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)  # Species + Count only
+
+    event.provider_metadata = {"serial_number": 267, "reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert 103 not in _values_by_field(posted)
+    assert _source_comments(inner) == ["EarthRanger event #267 — Reported by: Jane Doe"]
+
+
+@pytest.mark.asyncio
+async def test_reporter_alone_is_enough_to_post_the_source_comment(
+    mocker, integration, deliver_config, provider_info, event, metadata, fake_tag_info
+):
+    """No serial, no deep link, but a reporter: the comment still posts."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
+
+    event.provider_metadata = {"reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    assert _source_comments(inner) == ["Reported by: Jane Doe"]
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_reported_by_field_falls_back_to_the_comment(
+    mocker, integration, provider_info, event, metadata, fake_tag_info
+):
+    from app.actions.configurations import CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=fake_tag_info)
+
+    config = DeliverConfig(event_type_to_tag=[CmoreTagMapping(
+        event_type="lion_sighting", tag="42", reported_by_field="No Such Field",
+    )])
+    event.provider_metadata = {"reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert posted.tags[0].values == []
+    assert _source_comments(inner) == ["Reported by: Jane Doe"]
+
+
+@pytest.mark.asyncio
+async def test_reporter_does_not_duplicate_a_field_already_written_by_a_field_mapping(
+    mocker, integration, provider_info, event, metadata
+):
+    """A field mapping that already fills the "Reported by" field wins: the
+    reporter is not appended as a second value for the same fieldId (CMORE
+    single-valued fields would get conflicting values) and goes into the
+    source comment instead."""
+    from app.actions.configurations import CmoreFieldMapping, CmoreTagMapping, DeliverConfig
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=_tag_with_reported_by("Reported by"))
+
+    config = DeliverConfig(event_type_to_tag=[CmoreTagMapping(
+        event_type="lion_sighting", tag="42",
+        field_mappings=[CmoreFieldMapping(event_details_key="observer", cmore_field="103")],
+    )])
+    event.event_details = {"observer": "Field team B"}
+    event.provider_metadata = {"serial_number": 267, "reported_by": "Jane Doe"}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [v.value for v in posted.tags[0].values if v.fieldId == 103] == ["Field team B"]
+    assert _source_comments(inner) == ["EarthRanger event #267 — Reported by: Jane Doe"]
+
+
+@pytest.mark.asyncio
+async def test_event_without_reporter_adds_no_value_and_no_comment_part(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index(mocker, returning=_tag_with_reported_by())
+
+    event.provider_metadata = {"serial_number": 267}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert 103 not in _values_by_field(posted)
+    assert _source_comments(inner) == ["EarthRanger event #267"]
+
+
 @pytest.mark.asyncio
 async def test_event_with_tag_mapping_but_no_field_mappings_still_posts(
     mocker, integration, provider_info, event, metadata, fake_tag_info

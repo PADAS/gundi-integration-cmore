@@ -133,3 +133,16 @@ def test_auth_base_url_is_required():
     assert AuthenticateConfig.__fields__["base_url"].required
     with pytest.raises(pydantic.ValidationError):
         AuthenticateConfig(token="t", owner_group_id=1)
+
+
+def test_reported_by_field_offers_the_tag_fields_of_its_sibling_tag():
+    """The reporter field dropdown cascades off the tag chosen in the same
+    mapping entry (a sibling, so a bare $data name)."""
+    from app.actions.configurations import DeliverConfig
+
+    node = DeliverConfig.ui_schema()["event_type_to_tag"]["items"]["reported_by_field"]
+    ref = node["gundi:reference"]
+    assert ref["action"] == "list_tag_fields"
+    assert ref["target"] == "self"
+    assert ref["params"] == {"tag": {"$data": "tag"}}
+    assert "ui:widget" not in node

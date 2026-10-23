@@ -7,7 +7,7 @@ import os
 import re
 import traceback
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 from gundi_core import schemas
 from gundi_core.events import GundiDelivery
@@ -529,12 +529,15 @@ async def _build_event_tag(
     integration_id: str,
     mapping: CmoreTagMapping,
     event: schemas.v2.Event,
-) -> Optional[CmoreEventTag]:
+) -> Tuple[Optional[CmoreEventTag], bool]:
     """Resolve mapping + event_details into a CmoreEventTag.
 
-    Returns None if the configured tag is not found on the C-more instance —
-    the event still gets posted (with description + location), just without
-    the structured tag.
+    Returns ``(tag, reporter_placed)``. ``tag`` is None if the configured tag
+    is not found on the C-more instance — the event still gets posted (with
+    description + location), just without the structured tag.
+    ``reporter_placed`` says whether the event's reporter went into one of
+    the tag's fields; when it did not, the caller renders it in the source
+    comment instead.
     """
     tag_info = await tag_index.get(client, base_url, integration_id, mapping.tag)
     if tag_info is None:
@@ -544,7 +547,7 @@ async def _build_event_tag(
             mapping.tag,
             event.event_type,
         )
-        return None
+        return None, False
 
     # The C-more events endpoint accepts tags whose typeLimiter is Message or
     # Incident. Resource-typed tags belong to a different entity model.
@@ -576,6 +579,31 @@ async def _build_event_tag(
         for value in _resolve_field_values(field_info, fm, raw_value):
             values.append(CmoreTagValue(fieldId=field_info.id, value=value))
 
+    # The original reporter (EarthRanger user or subject) goes into the
+    # tag's "Reported by" field when it has one, so CMORE attributes the
+    # event to them rather than to the integration account.
+    reporter_placed = False
+    reporter = _get_reported_by(event)
+    if reporter is not None:
+        reporter_field = _reporter_field(tag_info, mapping)
+        if reporter_field is not None and any(v.fieldId == reporter_field.id for v in values):
+            # A field mapping already filled this field from event_details.
+            # That explicit choice wins: a second value for the same fieldId
+            # would hand CMORE conflicting values, so the reporter goes into
+            # the source comment instead.
+            logger.info(
+                "CMORE field %r (%d) already has a value from field_mappings; "
+                "the reporter goes into the source comment instead.",
+                reporter_field.name,
+                reporter_field.id,
+            )
+            reporter_field = None
+        if reporter_field is not None:
+            value = _resolve_field_value(reporter_field, reporter)
+            if value is not None:
+                values.append(CmoreTagValue(fieldId=reporter_field.id, value=value))
+                reporter_placed = True
+
     logger.info(
         "Attached CMORE tag %r (tagId=%d, typeLimiter=%s) with %d field value(s) "
         "to event (event_type=%r).",
@@ -585,7 +613,7 @@ async def _build_event_tag(
         len(values),
         event.event_type,
     )
-    return CmoreEventTag(tagId=tag_info.id, values=values)
+    return CmoreEventTag(tagId=tag_info.id, values=values), reporter_placed
 
 
 def _get_source_event_url(event: schemas.v2.Event) -> Optional[str]:
@@ -608,6 +636,40 @@ def _get_serial_number(event: schemas.v2.Event):
     if not isinstance(pm, dict):
         return None
     return pm.get("serial_number")
+
+
+def _get_reported_by(event: schemas.v2.Event) -> Optional[str]:
+    """The reporter's display name from event.provider_metadata (set by the
+    EarthRanger runner), or None when absent or blank."""
+    pm = event.provider_metadata or {}
+    if not isinstance(pm, dict):
+        return None
+    name = pm.get("reported_by")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+REPORTED_BY_FIELD_NAME = "reported by"
+
+
+def _reporter_field(tag_info, mapping: CmoreTagMapping):
+    """The CMORE field that takes the reporter: the configured
+    ``reported_by_field`` when it resolves, else the tag's field named
+    "Reported by" (case-insensitive), else None."""
+    if mapping.reported_by_field:
+        field_info = tag_info.resolve_field(mapping.reported_by_field)
+        if field_info is not None:
+            return field_info
+        logger.warning(
+            "CMORE tag %r has no field %r (reported_by_field); the reporter "
+            "goes into the source comment instead.",
+            tag_info.name,
+            mapping.reported_by_field,
+        )
+        return None
+    for field_info in tag_info.fields_by_id.values():
+        if field_info.name.strip().lower() == REPORTED_BY_FIELD_NAME:
+            return field_info
+    return None
 
 
 def _build_event_description(event: schemas.v2.Event) -> str:
@@ -681,7 +743,7 @@ async def _push_event(
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as client:
         tags = None
-        tag = await _build_event_tag(
+        tag, reporter_placed = await _build_event_tag(
             client, auth.base_url, str(integration.id), mapping, event
         )
         if tag is not None:
@@ -713,15 +775,19 @@ async def _push_event(
         cmore_message_id = _extract_message_id(response)
 
         # Post a comment carrying the source cross-reference — the EarthRanger
-        # serial number and the deep-link URL — so they surface in CMORE's event
-        # detail view (kept out of the title except for the serial). Posted when
-        # we have a messageId AND at least one of serial / URL is present.
+        # serial number, the reporter when no tag field took it, and the
+        # deep-link URL — so they surface in CMORE's event detail view (kept
+        # out of the title except for the serial). Posted when we have a
+        # messageId AND at least one part is present.
         source_event_url = _get_source_event_url(event)
         serial = _get_serial_number(event)
-        if cmore_message_id is not None and (source_event_url or serial is not None):
+        reporter = None if reporter_placed else _get_reported_by(event)
+        if cmore_message_id is not None and (source_event_url or serial is not None or reporter):
             parts = []
             if serial is not None:
                 parts.append(f"EarthRanger event #{serial}")
+            if reporter:
+                parts.append(f"Reported by: {reporter}")
             if source_event_url:
                 parts.append(f"Source: {source_event_url}")
             comment_body = " — ".join(parts)
@@ -746,9 +812,10 @@ async def _push_event(
             # distinguishable from a posted-but-invisible one.
             logger.info(
                 "Skipping CMORE source comment: source_event_url=%r serial=%r "
-                "cmore_message_id=%r",
+                "reporter=%r cmore_message_id=%r",
                 source_event_url,
                 serial,
+                reporter,
                 cmore_message_id,
             )
 
