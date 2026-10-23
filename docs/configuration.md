@@ -264,11 +264,20 @@ the ids the connector needs.
 - Exactly **one EarthRanger provider** connected to this CMORE destination in
   Gundi. None or several stops the action with
   `Expected exactly one connected EarthRanger provider, found N …`.
-- That provider's EarthRanger user must be able to manage event types. The
-  action checks `user/me` before writing and refuses with
+- That provider's EarthRanger user must be able to write what the action
+  creates. Before writing, the action checks and refuses with
   `EarthRanger user '<name>' lacks permissions: …` naming what is missing:
-  `eventcategory: add`, `eventtype: add, change`, `choice: add, change`. Grant
-  them on the EarthRanger site (Admin → Users → permission sets).
+  - `eventcategory: add` — to create the category, the first time. The user
+    who creates it is automatically given that category's own permission set.
+  - `cmore_<group>: change, view` — once the category exists, EarthRanger
+    enforces its per-category permissions (`activity.cmore_<group>_update` /
+    `_read`) on the event types in it. Grant the user the category's
+    permission set if a different account created it.
+  - `choice: add, change` — `choices.add_choice` / `change_choice`, needed
+    for the lookup options. EarthRanger does not list these on `user/me`, so
+    the action probes the choices endpoint without writing.
+  A superuser passes all of this. Grant permissions on the EarthRanger site
+  (Admin → Users → the user's permission sets).
 - A saved integration: the action does not run on a draft.
 
 ### Naming convention
@@ -278,7 +287,7 @@ the ids the connector needs.
 | Category | `cmore_<group>` | `cmore_7932` |
 | Event type | `cmore_<group>_<tagid>_<slug>` | `cmore_7932_20_evidence_of_poacher` |
 | Field key | `f<fieldid>_<slug>` | `f261_evidence_type` |
-| Choice value | the CMORE option text | `Abalone Harvesting` |
+| Choice value / display | slug of the CMORE option / the option text | `abalone_harvesting` / `Abalone Harvesting` |
 
 `<group>` is this integration's **Owner Group ID**, so one EarthRanger site
 can serve several CMORE share groups: each CMORE integration delivers only
@@ -313,8 +322,9 @@ the activity log.
 For an event whose type has no `event_type_to_tag` entry, the connector checks
 whether the type is one of its generated ones (`cmore_<group>_<tagid>_…` with
 its own group). If so, the tag comes from `<tagid>`, each `f<fieldid>_…` key in
-`event_details` goes to that field, and lookup values are matched to the
-CMORE options by text. Keys that are not generated field keys (a field you
+`event_details` goes to that field, and lookup values (the slugs EarthRanger
+stores, e.g. `abalone_harvesting`) are matched to the CMORE options ignoring
+case and punctuation. Keys that are not generated field keys (a field you
 added to the type by hand) are ignored. An explicit mapping entry for a
 generated type always wins over the convention.
 

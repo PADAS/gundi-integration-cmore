@@ -1120,13 +1120,15 @@ async def _push_attachment_as_comment(
 
 ER_PROVIDER_TYPE = "earthranger"
 
-# What the connected EarthRanger user must be allowed to do before this
-# action writes anything. Keys are the resource names user/me reports.
-REQUIRED_ER_PERMISSIONS: Dict[str, set] = {
-    "eventcategory": {"add"},
-    "eventtype": {"add", "change"},
-    "choice": {"add", "change"},
-}
+# What EarthRanger enforces on the writes this action makes (verified in
+# das): creating the category needs ``activity.add_eventcategory``; once the
+# category exists, event types in it need the per-category permission
+# ``activity.cmore_<group>_update`` (and ``_read`` to list them), which
+# user/me reports under the category value with verbs add/change/view/delete;
+# choices need ``choices.add_choice`` / ``change_choice``, which user/me never
+# lists (only the "activity" app is reported), so those are probed on the
+# endpoint. A superuser passes everything.
+CATEGORY_PERMISSION_VERBS = {"change", "view"}
 
 
 class ErProvider(pydantic.BaseModel):
@@ -1179,28 +1181,55 @@ async def _resolve_er_provider(integration: Integration) -> ErProvider:
     )
 
 
-def _missing_er_permissions(me: dict) -> Dict[str, List[str]]:
-    """Required verbs the user/me document does not grant, per resource."""
-    granted = (me or {}).get("permissions") or {}
+def _missing_er_permissions(
+    me: dict,
+    *,
+    group: int,
+    category_exists: bool,
+    can_add_choices: bool,
+    can_change_choices: bool,
+) -> Dict[str, List[str]]:
+    """Required permissions the EarthRanger user lacks, per resource (sorted
+    verbs); {} when the run may proceed."""
+    me = me or {}
+    if me.get("is_superuser"):
+        return {}
+    granted = me.get("permissions") or {}
     missing: Dict[str, List[str]] = {}
-    for resource, verbs in REQUIRED_ER_PERMISSIONS.items():
-        have = set(granted.get(resource) or [])
-        lacking = sorted(verbs - have)
+    if category_exists:
+        category = category_value(group)
+        lacking = sorted(CATEGORY_PERMISSION_VERBS - set(granted.get(category) or []))
         if lacking:
-            missing[resource] = lacking
+            missing[category] = lacking
+    elif "add" not in (granted.get("eventcategory") or []):
+        missing["eventcategory"] = ["add"]
+    choice_missing = [verb for verb, ok in (("add", can_add_choices), ("change", can_change_choices)) if not ok]
+    if choice_missing:
+        missing["choice"] = choice_missing
     return missing
 
 
-async def _er_preflight(er: ErAdminClient) -> dict:
+async def _er_preflight(er: ErAdminClient, group: int) -> Tuple[dict, List[dict]]:
+    """Check the EarthRanger user can do what this run needs, before any
+    write. Returns the preflight report and the site's categories (fetched
+    here because the required permissions depend on whether ours exists)."""
     me = await er.get_me()
-    missing = _missing_er_permissions(me)
+    categories = await er.get_event_categories()
+    category_exists = any(c.get("value") == category_value(group) for c in categories)
+    missing = _missing_er_permissions(
+        me,
+        group=group,
+        category_exists=category_exists,
+        can_add_choices=await er.can_add_choices(),
+        can_change_choices=await er.can_change_choices(),
+    )
     username = (me or {}).get("username") or "<unknown>"
     if missing:
         detail = "; ".join(f"{resource}: {', '.join(verbs)}" for resource, verbs in sorted(missing.items()))
         raise IntegrationConfigurationError(
             f"EarthRanger user {username!r} lacks permissions: {detail}"
         )
-    return {"username": username, "permissions_ok": True}
+    return {"username": username, "permissions_ok": True}, categories
 
 
 def _raw_tags_by_id(raw_response: list) -> Dict[int, dict]:
@@ -1257,14 +1286,16 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
     return found
 
 
-async def _ensure_category(er: ErAdminClient, group: int, label: Optional[str], dry_run: bool) -> dict:
+async def _ensure_category(
+    er: ErAdminClient, group: int, label: Optional[str], dry_run: bool, categories: List[dict]
+) -> dict:
     value = category_value(group)
-    display = (label or "").strip() or f"CMORE group {group}"
-    for category in await er.get_event_categories():
+    display = ((label or "").strip() or f"CMORE group {group}")[:100]
+    for category in categories:
         if category.get("value") == value:
             return {"value": value, "display": category.get("display") or display, "action": "unchanged"}
     if not dry_run:
-        await er.post_event_category({"value": value, "display": display[:100], "is_active": True})
+        await er.post_event_category({"value": value, "display": display, "is_active": True})
     return {"value": value, "display": display, "action": "created"}
 
 
@@ -1308,9 +1339,9 @@ async def action_create_er_event_types(
     async with ErAdminClient(
         provider.site_root, token=provider.token, username=provider.username, password=provider.password
     ) as er:
-        preflight = await _er_preflight(er)
+        preflight, categories = await _er_preflight(er, group)
         existing = _existing_generated_types(await er.get_event_types(), group, specs)
-        category = await _ensure_category(er, group, action_config.share_group_label, dry_run)
+        category = await _ensure_category(er, group, action_config.share_group_label, dry_run, categories)
 
         counts = {"created": 0, "updated": 0, "deactivated": 0}
         reported: List[dict] = []
@@ -1319,12 +1350,37 @@ async def action_create_er_event_types(
             existing_value = prior["value"] if prior else None
             existing_keys = prior["keys"] if prior else {}
             payload = build_event_type_payload(spec, existing_value=existing_value, existing_keys=existing_keys)
-            if not dry_run:
-                if prior:
-                    await er.patch_event_type(existing_value, payload)
-                else:
-                    await er.post_event_type(payload)
-            await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
+            try:
+                if not dry_run:
+                    if prior:
+                        await er.patch_event_type(existing_value, payload)
+                    else:
+                        await er.post_event_type(payload)
+                await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
+            except Exception as exc:
+                # Every step is idempotent, so a re-run finishes the rest; the
+                # operator still needs to see how far this run got.
+                await log_action_activity(
+                    integration_id=str(integration.id),
+                    action_id="create_er_event_types",
+                    title=f"Creating EarthRanger event types stopped at {spec.display}",
+                    level=LogLevel.ERROR,
+                    data={
+                        "earthranger_site": provider.site_root,
+                        "category": category,
+                        "event_types_completed": reported,
+                        "failed_event_type": payload["value"],
+                        "choices": counts,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code == 403:
+                    raise IntegrationConfigurationError(
+                        f"EarthRanger refused a write (HTTP 403): user {preflight['username']!r} lacks a "
+                        "permission the preflight could not see; grant it and run again"
+                    ) from exc
+                raise
             reported.append({
                 "value": payload["value"],
                 "display": spec.display,

@@ -18,11 +18,14 @@ FIXTURE = pathlib.Path(__file__).parent.parent.parent / "datasource" / "tests" /
 RAW_TAGS = json.loads(FIXTURE.read_text())
 
 ER_INTEGRATION_ID = "11111111-1111-1111-1111-111111111111"
+# What user/me reports for a user who may create the category (and therefore
+# gets its per-category permission set). EarthRanger never reports choice
+# permissions there: the choices app is filtered out of user/me.
 FULL_PERMISSIONS = {
     "eventcategory": ["view", "add", "change"],
     "eventtype": ["view", "add", "change"],
-    "choice": ["view", "add", "change"],
 }
+CATEGORY_PERMISSIONS = {"cmore_7932": ["view", "add", "change", "delete"]}
 
 
 @pytest.fixture
@@ -82,6 +85,8 @@ def mock_er_admin(mocker):
     er.patch_event_type = AsyncMock(return_value={})
     er.post_choice = AsyncMock(return_value={})
     er.patch_choice = AsyncMock(return_value={})
+    er.can_add_choices = AsyncMock(return_value=True)
+    er.can_change_choices = AsyncMock(return_value=True)
     client_cls = MagicMock()
     client_cls.return_value.__aenter__ = AsyncMock(return_value=er)
     client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -192,24 +197,83 @@ async def test_malformed_provider_url_is_a_configuration_error(integration, mock
 
 
 @pytest.mark.asyncio
-async def test_missing_permissions_fail_before_any_write(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+async def test_missing_category_add_permission_fails_before_any_write(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """No category yet: creating it needs activity.add_eventcategory."""
     mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": {"eventtype": ["view"]}}
     with pytest.raises(IntegrationConfigurationError) as exc:
         await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
     message = str(exc.value)
-    assert "'ingest'" in message
-    assert "choice: add, change" in message
-    assert "eventcategory: add" in message
-    assert "eventtype: add, change" in message
+    assert "'ingest'" in message and "eventcategory: add" in message
     assert _write_calls(mock_er_admin) == 0
 
 
 @pytest.mark.asyncio
-async def test_missing_choice_entry_is_reported_not_crashed(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
-    permissions = {k: v for k, v in FULL_PERMISSIONS.items() if k != "choice"}
-    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": permissions}
+async def test_existing_category_requires_its_per_category_permissions(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """Once the category exists, EarthRanger enforces activity.cmore_<group>_update
+    (and read, to list the types), not the model permissions."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "Old"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": {"eventcategory": ["add"]}}
+    with pytest.raises(IntegrationConfigurationError, match="cmore_7932: change, view"):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    assert _write_calls(mock_er_admin) == 0
+
+    # With the category permissions, no model permission is needed at all.
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    assert result["earthranger"]["permissions_ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_superuser_passes_the_preflight_without_listed_permissions(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    mock_er_admin.get_me.return_value = {"username": "admin", "is_superuser": True, "permissions": {}}
+    mock_er_admin.can_add_choices.return_value = False
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    assert result["earthranger"] == {"site": "https://site.pamdas.org", "username": "admin", "permissions_ok": True}
+
+
+@pytest.mark.asyncio
+async def test_choice_permissions_are_probed_not_read_from_user_me(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """user/me never lists the choices app, so the preflight probes the
+    endpoint instead; a 403 there is reported like any other missing permission."""
+    mock_er_admin.can_add_choices.return_value = False
+    mock_er_admin.can_change_choices.return_value = False
     with pytest.raises(IntegrationConfigurationError, match="choice: add, change"):
         await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    assert _write_calls(mock_er_admin) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_403_on_a_write_becomes_a_configuration_error_with_the_partial_result(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    import httpx
+    from gundi_core.schemas.v2 import LogLevel
+
+    request = httpx.Request("POST", "https://site.pamdas.org/api/v1.0/choices/")
+    mock_er_admin.post_choice.side_effect = httpx.HTTPStatusError(
+        "forbidden", request=request, response=httpx.Response(403, request=request)
+    )
+    with pytest.raises(IntegrationConfigurationError, match="HTTP 403"):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    partial = next(c for c in activity_log.await_args_list if c.kwargs["level"] == LogLevel.ERROR)
+    assert partial.kwargs["data"]["failed_event_type"] == "cmore_7932_20_evidence_of_poacher"
+    assert partial.kwargs["data"]["event_types_completed"] == []
+    assert partial.kwargs["data"]["category"]["action"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_other_write_failures_log_the_partial_result_and_propagate(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    import httpx
+    from gundi_core.schemas.v2 import LogLevel
+
+    request = httpx.Request("POST", "https://site.pamdas.org/api/v2.0/activity/eventtypes/")
+    mock_er_admin.post_event_type.side_effect = [
+        {},  # first tag is written
+        httpx.HTTPStatusError("boom", request=request, response=httpx.Response(500, request=request)),
+    ]
+    with pytest.raises(httpx.HTTPStatusError):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20", "43"]))
+    partial = next(c for c in activity_log.await_args_list if c.kwargs["level"] == LogLevel.ERROR)
+    assert [et["value"] for et in partial.kwargs["data"]["event_types_completed"]] == ["cmore_7932_20_evidence_of_poacher"]
+    assert partial.kwargs["data"]["failed_event_type"] == "cmore_7932_43_poached_animal"
 
 
 @pytest.mark.asyncio
@@ -222,13 +286,17 @@ async def test_preflight_passes_and_reports(integration, mock_gundi, mock_er_adm
 def test_missing_er_permissions_pure():
     from app.actions.handlers import _missing_er_permissions
 
-    assert _missing_er_permissions({"permissions": dict(FULL_PERMISSIONS)}) == {}
-    assert _missing_er_permissions({"permissions": {}}) == {
+    ok = {"username": "u", "permissions": dict(FULL_PERMISSIONS)}
+    assert _missing_er_permissions(ok, group=7932, category_exists=False, can_add_choices=True, can_change_choices=True) == {}
+    assert _missing_er_permissions({"permissions": {}}, group=7932, category_exists=False, can_add_choices=False, can_change_choices=False) == {
         "choice": ["add", "change"],
         "eventcategory": ["add"],
-        "eventtype": ["add", "change"],
     }
-    assert _missing_er_permissions({}) == _missing_er_permissions({"permissions": {}})
+    assert _missing_er_permissions({"permissions": {"cmore_7932": ["view"]}}, group=7932, category_exists=True, can_add_choices=True, can_change_choices=True) == {
+        "cmore_7932": ["change"],
+    }
+    assert _missing_er_permissions({"is_superuser": True}, group=7932, category_exists=True, can_add_choices=False, can_change_choices=False) == {}
+    assert _missing_er_permissions({}, group=1, category_exists=False, can_add_choices=True, can_change_choices=True) == {"eventcategory": ["add"]}
 
 
 # ----- Task 7: build, reconcile and write -----
@@ -291,12 +359,15 @@ async def test_share_group_label_names_the_category(integration, mock_gundi, moc
 
 @pytest.mark.asyncio
 async def test_second_run_patches_the_existing_type_and_leaves_choices(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    from app.datasource.er_event_types import slugify
+
     mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
     mock_er_admin.get_event_types.return_value = [_existing_type(), {"value": "rhino_carcass", "schema": {}}]
     tag = next(t for t in RAW_TAGS[0]["tags"] if t["id"] == 20)
     field = next(f for f in tag["fields"] if f["id"] == 261)
     mock_er_admin.get_choices.return_value = [
-        {"id": str(i), "value": lk["value"], "display": lk["value"], "is_active": True, "ordernum": lk["order"]}
+        {"id": str(i), "value": slugify(lk["value"]), "display": lk["value"], "is_active": True, "ordernum": lk["order"]}
         for i, lk in enumerate(field["lookups"])
     ]
     result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
@@ -314,6 +385,7 @@ async def test_second_run_patches_the_existing_type_and_leaves_choices(integrati
 @pytest.mark.asyncio
 async def test_existing_category_is_not_rewritten(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
     mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "Old"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
     result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
     mock_er_admin.post_event_category.assert_not_awaited()
     assert result["category"] == {"value": "cmore_7932", "display": "Old", "action": "unchanged"}

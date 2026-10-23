@@ -119,3 +119,28 @@ async def test_server_error_raises_http_status_error(monkeypatch):
     async with ErAdminClient(SITE, token="t", transport=transport) as client:
         with pytest.raises(httpx.HTTPStatusError):
             await client.get_event_categories()
+
+
+@pytest.mark.asyncio
+async def test_choice_permission_probes_read_the_status_without_writing():
+    """DRF checks model permissions before deserialising, so an empty POST
+    answers 400 when the user may add choices and 403 when not; an empty
+    PATCH on a random id answers 404 (allowed) or 403."""
+    def handler(r):
+        if r.method == "POST":
+            return httpx.Response(400, json={"status": {"detail": "value is required"}})
+        return httpx.Response(403, json={"status": {"detail": "forbidden"}})
+
+    transport, seen = _transport(handler)
+    async with ErAdminClient(SITE, token="t", transport=transport) as client:
+        assert await client.can_add_choices() is True
+        assert await client.can_change_choices() is False
+    assert [(r.method, r.url.path.rsplit("/", 2)[0]) for r in seen] == [("POST", "/api/v1.0"), ("PATCH", "/api/v1.0/choices")]
+    assert json.loads(seen[0].content) == {} and json.loads(seen[1].content) == {}
+
+
+@pytest.mark.asyncio
+async def test_choice_permission_probes_treat_not_found_as_allowed():
+    transport, _ = _transport(lambda r: httpx.Response(404, json={}))
+    async with ErAdminClient(SITE, token="t", transport=transport) as client:
+        assert await client.can_change_choices() is True

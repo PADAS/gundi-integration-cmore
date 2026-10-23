@@ -94,7 +94,7 @@ def test_spec_for_evidence_of_poacher():
     assert by_key["f261_evidence_type"].type == "multiselect"  # allowMultipleValues on a Lookup
     assert by_key["f261_evidence_type"].cmore_field_id == 261
     assert by_key["f261_evidence_type"].options[0] == ChoiceOption(
-        value="Abalone Harvesting", display="Abalone Harvesting", ordernum=1
+        value="abalone_harvesting", display="Abalone Harvesting", ordernum=1
     )
     assert by_key["f264_number_of_snares_found"].type == "number"
     assert by_key["f264_number_of_snares_found"].hint == "Number of snares found"
@@ -140,8 +140,9 @@ def test_nested_options_emit_top_level_only_and_report_shallow():
     spec = build_event_type_spec(_tag(43), 7932)  # Poached Animal
     animal = next(f for f in spec.fields if f.label == "Animal")
     assert all(o.value for o in animal.options)
-    assert "Hoof Animal" in [o.value for o in animal.options]
-    assert "Buffalo" not in [o.value for o in animal.options]
+    assert "Hoof Animal" in [o.display for o in animal.options]
+    assert "hoof_animal" in [o.value for o in animal.options]
+    assert "Buffalo" not in [o.display for o in animal.options]
     shallow = next(s for s in spec.shallow_fields if s.name == "Animal")
     assert shallow.cmore_field_id == 1478 and shallow.nested_option_count > 0
 
@@ -164,7 +165,21 @@ def test_options_are_ordered_by_cmore_order_and_truncated():
         "lookups": [{"id": 2, "value": "b", "order": 2}, {"id": 1, "value": "x" * 120, "order": 1}],
     }]}
     opts = build_event_type_spec(raw, 1).fields[0].options
-    assert [o.ordernum for o in opts] == [1, 2] and len(opts[0].value) == 100
+    assert [o.ordernum for o in opts] == [1, 2] and len(opts[0].value) == 100 and len(opts[0].display) == 100
+
+
+def test_option_values_are_slugs_and_collisions_get_the_lookup_id():
+    from app.datasource.er_event_types import build_event_type_spec
+
+    raw = {"id": 1, "name": "T", "fields": [{
+        "id": 9, "name": "X", "dataType": "Lookup",
+        "lookups": [{"id": 11, "value": "Sub-Adult", "order": 1}, {"id": 12, "value": "Sub Adult", "order": 2},
+                    {"id": 13, "value": "Abalone Harvesting", "order": 3}],
+    }]}
+    opts = build_event_type_spec(raw, 1).fields[0].options
+    assert [(o.value, o.display) for o in opts] == [
+        ("sub_adult", "Sub-Adult"), ("sub_adult_12", "Sub Adult"), ("abalone_harvesting", "Abalone Harvesting"),
+    ]
 
 
 # ----- v2 payload and choices -----
@@ -223,7 +238,9 @@ def test_choice_records_shape():
     from app.datasource.er_event_types import build_choice_records, build_event_type_spec
 
     recs = build_choice_records(build_event_type_spec(_tag(20), 7932))["f261_evidence_type"]
-    assert recs[0] == {"model": "activity.event", "field": "f261_evidence_type", "value": "Abalone Harvesting",
+    # EarthRanger's Choice.clean() only accepts ^\\w+$ values, so the value is
+    # the slug and the display keeps the CMORE text.
+    assert recs[0] == {"model": "activity.event", "field": "f261_evidence_type", "value": "abalone_harvesting",
                        "display": "Abalone Harvesting", "is_active": True, "ordernum": 1}
 
 

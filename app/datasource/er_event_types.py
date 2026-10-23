@@ -157,18 +157,30 @@ def _count_nested(lookups: list) -> int:
 
 
 def _options(raw_field: dict) -> List[ChoiceOption]:
+    """Choice options for a lookup field. EarthRanger's ``Choice.clean()``
+    accepts only ``^\\w+$`` values, so the value is the slug of the CMORE
+    option (the lookup id is appended when two options slug alike) and the
+    display keeps the CMORE text. Delivery normalises both sides, so the
+    slug still resolves to the CMORE option."""
     lookups = sorted(
         (lk for lk in (raw_field.get("lookups") or []) if lk.get("value") is not None),
         key=lambda lk: (lk.get("order") if lk.get("order") is not None else 0, lk.get("id") or 0),
     )
-    return [
-        ChoiceOption(
-            value=str(lk["value"])[:CHOICE_VALUE_LIMIT],
-            display=str(lk["value"])[:CHOICE_VALUE_LIMIT],
+    options: List[ChoiceOption] = []
+    seen = set()
+    for index, lk in enumerate(lookups, start=1):
+        text = str(lk["value"])
+        value = (slugify(text) or f"option_{lk.get('id') or index}")[:CHOICE_VALUE_LIMIT]
+        if value in seen:
+            suffix = f"_{lk.get('id') or index}"
+            value = value[: CHOICE_VALUE_LIMIT - len(suffix)] + suffix
+        seen.add(value)
+        options.append(ChoiceOption(
+            value=value,
+            display=text[:CHOICE_VALUE_LIMIT],
             ordernum=int(lk.get("order") if lk.get("order") is not None else index),
-        )
-        for index, lk in enumerate(lookups, start=1)
-    ]
+        ))
+    return options
 
 
 def build_event_type_spec(raw_tag: dict, group: int) -> EventTypeSpec:

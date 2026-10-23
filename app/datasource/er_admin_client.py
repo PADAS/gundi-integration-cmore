@@ -17,6 +17,7 @@ Endpoints (``site_root`` = ``scheme://host``):
 * ``POST <site>/oauth2/token`` (password grant, client ``das_web_client``)
 """
 
+import uuid
 from typing import List, Optional
 
 import backoff
@@ -150,6 +151,25 @@ class ErAdminClient:
             if _never_seen_field(exc.response):
                 return []
             raise
+
+    # ----- permission probes -----
+    #
+    # user/me never lists the choices app (EarthRanger filters every app but
+    # "activity" out of its permissions dict), so the only way to learn
+    # whether the user may write choices without writing one is to ask the
+    # endpoint: DRF checks model permissions before deserialising, so an
+    # empty body answers 403 when the permission is missing and a validation
+    # 400 (or a 404 for a random id) when it is held.
+
+    async def _probe(self, method: str, path: str) -> bool:
+        response = await self._client.request(method, path, json={}, headers=await self._headers())
+        return response.status_code != 403
+
+    async def can_add_choices(self) -> bool:
+        return await self._probe("POST", f"{_V1}/choices/")
+
+    async def can_change_choices(self) -> bool:
+        return await self._probe("PATCH", f"{_V1}/choices/{uuid.uuid4()}/")
 
     # ----- writes -----
 

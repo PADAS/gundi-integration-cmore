@@ -1892,3 +1892,25 @@ async def test_reporter_field_still_applies_on_convention_path(
     posted = inner.post_event.await_args[0][0]
     assert (260, "Jane") in [(v.fieldId, v.value) for v in posted.tags[0].values]
     assert all("Reported by" not in c for c in _source_comments(inner))
+
+
+@pytest.mark.asyncio
+async def test_slugged_choice_value_resolves_to_the_cmore_option(
+    mocker, integration, deliver_config, provider_info, event, metadata
+):
+    """Generated ER choice values are slugs ("bait_collection"); delivery
+    resolves them to the CMORE option text ("Bait Collection")."""
+    from app.actions.handlers import action_deliver
+
+    inner = _patch_cmore_client(mocker)
+    _patch_state_manager(mocker)
+    _patch_activity_logger(mocker)
+    _patch_tag_index_recording(mocker, _generated_tag_info())
+
+    event.event_type = GENERATED_TYPE
+    event.event_details = {"f261_evidence_type": ["bait_collection", "camp"]}
+    delivery = GundiDelivery(payload=event, provider=provider_info)
+    await action_deliver(integration, deliver_config, delivery, metadata)
+
+    posted = inner.post_event.await_args[0][0]
+    assert [(v.fieldId, v.value) for v in posted.tags[0].values] == [(261, "Bait Collection"), (261, "Camp")]

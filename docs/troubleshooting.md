@@ -92,14 +92,29 @@ provider's Gundi **base URL** lacks a scheme or host (it should look like
 ## The EarthRanger user lacks permissions
 
 ```
-EarthRanger user 'lapalala-gundi' lacks permissions: choice: add, change; eventcategory: add; eventtype: add, change
+EarthRanger user 'lapalala-gundi' lacks permissions: choice: add, change; eventcategory: add
 ```
 
 The connected EarthRanger provider's user is usually a data-ingest account.
-Creating categories, event types and choices needs the listed permissions.
+What it needs depends on where you are:
+
+- **First run** (no `cmore_<group>` category yet): `eventcategory: add`
+  (`activity.add_eventcategory`). Creating the category gives that same user
+  the category's own permission set.
+- **Later runs**: `cmore_<group>: change, view` — the category's per-category
+  permissions (`activity.cmore_<group>_update` / `_read`). If this appears, a
+  *different* account created the category; grant this user its permission
+  set.
+- **Always**: `choice: add, change` (`choices.add_choice` /
+  `choices.change_choice`) for the lookup options. These never show on
+  `user/me`, so the action probes the choices endpoint without writing.
+
 Grant them on the EarthRanger site (Admin → Users → the user's permission
 sets) and run the action again. **Preview only** performs this check without
-writing, so run it before the day you need the types.
+writing, so run it before the day you need the types. If a write still gets
+`EarthRanger refused a write (HTTP 403)`, the activity log entry *Creating
+EarthRanger event types stopped at …* lists what was completed; grant the
+permission and re-run — every step is idempotent.
 
 ## A field is missing from a generated event type
 

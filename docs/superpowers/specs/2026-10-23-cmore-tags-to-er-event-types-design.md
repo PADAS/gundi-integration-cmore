@@ -1,7 +1,7 @@
 # CMORE tags → EarthRanger event types — design
 
 **Date:** 2026-10-23
-**Status:** Draft for approval (design conversation in chat, 2026-10-23; builder-check questions resolved the same day)
+**Status:** Approved 2026-10-23 (design conversation in chat; builder-check questions resolved the same day; Decisions 2 and 7 revised after the final code review the same day)
 **Origin:** Partner feedback (Aug–Oct 2026 testing): mapping each CMORE tag
 and its properties to an EarthRanger event type by hand is tedious. Asked for:
 pick the CMORE tags to use, and get an EarthRanger event type for each, with
@@ -91,8 +91,13 @@ their names.
      whole value stays ≤ 255; `display` = the tag name.
    - field key `f<fieldid>_<slug>` from the field name, same slug rule, ≤ 40
      chars including the prefix (so it doubles as the `Choice.field` name).
-   - choice `value` = the CMORE lookup value verbatim (≤ 100 chars,
-     truncated), `display` the same, `ordernum` from CMORE's `order`.
+   - choice `value` = the **slug** of the CMORE lookup value (≤ 100 chars;
+     the lookup id is appended when two options slug alike), `display` = the
+     CMORE text verbatim (≤ 100), `ordernum` from CMORE's `order`. *Revised
+     after the final review (2026-10-23): EarthRanger's `Choice.clean()`
+     accepts only `^\w+$` values, so verbatim text relied on the API path
+     skipping validation. Delivery normalises both sides (case and
+     punctuation dropped), so the slug resolves to the CMORE option.*
 3. **Delivery recognises the convention.** In `_push_event`, when no explicit
    `event_type_to_tag` entry matches and `event_type` parses as
    `cmore_<group>_<tagid>_…` **with `<group>` equal to this integration's
@@ -156,16 +161,27 @@ their names.
    **No credential override.** The connected provider's EarthRanger user is
    the one that writes (decided 2026-10-23). It is usually a data-ingest
    account, so before anything is written the handler runs a **permissions
-   preflight**: `GET /api/v1.0/user/me` and checks `permissions` for
-   `eventcategory: add`, `eventtype: add` and `change`, and the choices
-   entry's `add` and `change` (the builder confirms that key's exact name
-   against a dev `user/me` response; the ER runner's `_extract_global_permissions`
-   shows the shape). Anything missing fails the run with an
-   `IntegrationConfigurationError` whose message lists the missing
-   permissions and the EarthRanger username, so the operator can fix the
-   account on the EarthRanger site. The preflight also runs on `dry_run` and
-   its outcome is part of the result, so *Preview only* doubles as the
-   pre-workshop readiness check.
+   preflight** against what EarthRanger actually enforces (verified in das
+   during the final review, 2026-10-23):
+   - a superuser (`user/me` → `is_superuser`) passes everything;
+   - while the `cmore_<group>` category does not exist: `eventcategory: add`
+     (`activity.add_eventcategory`); creating it hands the same user the
+     category's own permission set;
+   - once it exists: the per-category permissions EarthRanger enforces on
+     event types in it, reported by `user/me` under the category value as
+     `cmore_<group>: change, view`;
+   - choices: `choices.add_choice` / `change_choice`, which `user/me` never
+     reports (only the `activity` app is listed), so they are **probed**
+     with an empty `POST /api/v1.0/choices/` and `PATCH /api/v1.0/choices/<random>/`
+     — DRF checks model permissions before deserialising, so 403 means
+     missing and 400/404 means held.
+   Anything missing fails the run with an `IntegrationConfigurationError`
+   whose message lists the missing permissions and the EarthRanger username.
+   A 403 on a later write is translated to the same error class, after an
+   ERROR activity entry carrying the partial result (what was completed and
+   which type failed). The preflight also runs on `dry_run` and its outcome
+   is part of the result, so *Preview only* doubles as the pre-workshop
+   readiness check.
 8. **Where it runs.** A `GenericActionConfiguration` + `ExecutableActionMixin`
    action, `create_er_event_types`, titled *Create EarthRanger event types*,
    so the portal shows a Run button with its form. It is **not** a reference
