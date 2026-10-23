@@ -1268,6 +1268,27 @@ def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
     return resolved
 
 
+def _hand_mapped_event_types(integration: Integration, index: TagIndexData, group: int) -> Dict[int, List[str]]:
+    """Per CMORE tag id, the hand-built EarthRanger event types the saved
+    Deliver config already maps to it (sorted). Entries that name one of this
+    group's generated types are not hand-built and are left out; tag refs
+    that do not resolve are ignored."""
+    deliver = integration.get_action_config("deliver")
+    entries = ((deliver.data or {}).get("event_type_to_tag") or []) if deliver else []
+    found: Dict[int, set] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        event_type = entry.get("event_type")
+        tag_info = index.resolve(str(entry.get("tag") or ""))
+        if not event_type or tag_info is None:
+            continue
+        if parse_generated_event_type(event_type, group) is not None:
+            continue
+        found.setdefault(tag_info.id, set()).add(event_type)
+    return {tag_id: sorted(types) for tag_id, types in found.items()}
+
+
 def _schema_dict(schema) -> dict:
     """An event type's schema as a dict. EarthRanger's v2 listing returns it
     as a JSON string; anything unparseable reads as empty, so the type is
@@ -1351,8 +1372,13 @@ async def action_create_er_event_types(
     dry_run = action_config.dry_run
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as cmore:
-        raw_tags = _resolve_tag_refs(action_config.tags, await cmore.get_tags())
+        raw_response = await cmore.get_tags()
+    raw_tags = _resolve_tag_refs(action_config.tags, raw_response)
     specs = [build_event_type_spec(raw, group) for raw in raw_tags]
+    # Tags already mapped from a hand-built ER type are still generated; the
+    # result and the activity log name the existing types so the operator can
+    # decide which one rangers should use.
+    hand_mapped = _hand_mapped_event_types(integration, _build_index(raw_response), group)
 
     provider = await _resolve_er_provider(integration)
     async with ErAdminClient(
@@ -1407,6 +1433,7 @@ async def action_create_er_event_types(
                 "fields": len(spec.fields),
                 "skipped": [f.dict() for f in spec.skipped],
                 "shallow_fields": [f.dict() for f in spec.shallow_fields],
+                "mapped_by_hand": hand_mapped.get(spec.cmore_tag_id, []),
             })
 
     result = {
@@ -1430,6 +1457,17 @@ async def action_create_er_event_types(
         },
     )
     for et in reported:
+        if et["mapped_by_hand"]:
+            await log_action_activity(
+                integration_id=str(integration.id),
+                action_id="create_er_event_types",
+                title=(
+                    f"{et['display']} is already mapped from "
+                    f"{', '.join(et['mapped_by_hand'])}; rangers will see both types"
+                ),
+                level=LogLevel.WARNING,
+                data={"event_type": et["value"], "mapped_by_hand": et["mapped_by_hand"]},
+            )
         if et["skipped"]:
             await log_action_activity(
                 integration_id=str(integration.id),

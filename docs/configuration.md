@@ -280,6 +280,17 @@ the ids the connector needs.
   (Admin → Users → the user's permission sets).
 - A saved integration: the action does not run on a draft.
 
+### Tags you already map by hand
+
+If a selected tag is already the target of an **Event type → CMORE tag**
+entry for an event type you built yourself, the action still creates the
+generated type, so EarthRanger then has two types for that tag. Both deliver
+correctly: your hand-built type keeps its explicit mapping, and the generated
+one maps by convention. The result lists the existing types under
+`mapped_by_hand`, and the activity log warns *"<tag> is already mapped from
+<type>; rangers will see both types"*. Run **Preview only** first to see these,
+then either leave the tag out or retire the hand-built type in EarthRanger.
+
 ### Naming convention
 
 | Object | Value | Example |
