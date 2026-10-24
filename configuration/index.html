@@ -556,6 +556,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#tags-you-already-map-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tags you already map by hand
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#naming-convention" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -949,6 +960,18 @@ the ids the connector needs.</p>
   (Admin → Users → the user's permission sets).</li>
 <li>A saved integration: the action does not run on a draft.</li>
 </ul>
+<h3 id="tags-you-already-map-by-hand">Tags you already map by hand<a class="headerlink" href="#tags-you-already-map-by-hand" title="Permanent link">&para;</a></h3>
+<p>If a selected tag is already the target of an <strong>Event type → CMORE tag</strong>
+entry for an event type you built yourself, the action still creates the
+generated type, so EarthRanger then has two types for that tag. Both deliver
+correctly: your hand-built type keeps its explicit mapping, and the generated
+one maps by convention. The result lists the existing types under
+<code>mapped_by_hand</code> on every run, Preview only included; the activity log warns
+<em>"<tag> is already mapped from <type>; rangers will see both types"</em> once, on
+the run that creates the second type. The check reads your mappings the way
+delivery does (the first entry per event type). Run <strong>Preview only</strong> first to
+see these, then either leave the tag out or retire the hand-built type in
+EarthRanger.</p>
 <h3 id="naming-convention">Naming convention<a class="headerlink" href="#naming-convention" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
