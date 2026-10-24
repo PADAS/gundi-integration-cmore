@@ -1,4 +1,5 @@
-from typing import List, Optional
+import inspect
+from typing import ClassVar, List, Optional
 
 import pydantic
 from app.datasource.schemas import Affiliation, CmoreClassification
@@ -12,7 +13,38 @@ from .core import (
 )
 
 
-class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
+
+def _portal_description(schema: dict, model) -> None:
+    """Pydantic copies a model's docstring into its schema ``description``,
+    and the Gundi portal renders that above the form and above nested array
+    items. Docstrings here are developer notes, so they are dropped; a model
+    that wants text in the portal sets ``portal_description`` instead."""
+    explicit = getattr(model, "portal_description", None)
+    if explicit:
+        schema["description"] = explicit
+    elif schema.get("description") == inspect.getdoc(model):
+        schema.pop("description", None)
+
+
+class PortalSchema(pydantic.BaseModel):
+    """Base for every config model rendered in the Gundi portal (see
+    _portal_description)."""
+
+    class Config:
+        schema_extra = staticmethod(_portal_description)
+
+    @classmethod
+    def schema(cls, *args, **kwargs):
+        # Enums have no schema_extra hook and Pydantic gives them the
+        # placeholder description "An enumeration."; drop it too.
+        schema = super().schema(*args, **kwargs)
+        for definition in (schema.get("definitions") or {}).values():
+            if definition.get("enum") and definition.get("description") == "An enumeration.":
+                definition.pop("description")
+        return schema
+
+
+class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin, PortalSchema):
     token: pydantic.SecretStr = FieldWithUIOptions(
         ...,
         title="API Token",
@@ -42,24 +74,24 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     )
 
 
-class ListTagNamesQuery(ReferenceActionConfiguration):
+class ListTagNamesQuery(ReferenceActionConfiguration, PortalSchema):
     """Query model for action_list_tag_names (no parameters)."""
 
 
-class ListTagFieldsQuery(ReferenceActionConfiguration):
+class ListTagFieldsQuery(ReferenceActionConfiguration, PortalSchema):
     """Query model for action_list_tag_fields."""
 
     tag: str  # tag id (preferred) or exact tag name
 
 
-class ListFieldOptionsQuery(ReferenceActionConfiguration):
+class ListFieldOptionsQuery(ReferenceActionConfiguration, PortalSchema):
     """Query model for action_list_field_options."""
 
     tag: str
     field: str  # field id (preferred) or exact field name
 
 
-class ListClassificationValuesQuery(ReferenceActionConfiguration):
+class ListClassificationValuesQuery(ReferenceActionConfiguration, PortalSchema):
     """Query for action_list_classification_values. Each level narrows the
     CMORE classification tree; the action returns the next level's values."""
 
@@ -81,7 +113,7 @@ class ListClassificationValuesQuery(ReferenceActionConfiguration):
 # revert plan when the portal bug GUNDI-5371 is fixed.
 
 
-class CmoreValueMapping(pydantic.BaseModel):
+class CmoreValueMapping(PortalSchema):
     """Translate one source (ER) value into the CMORE value to send.
 
     Required for Lookup/FixedLookup fields whenever the source vocabulary
@@ -103,7 +135,7 @@ class CmoreValueMapping(pydantic.BaseModel):
     )
 
 
-class CmoreFieldMapping(pydantic.BaseModel):
+class CmoreFieldMapping(PortalSchema):
     """One Gundi event_details key → one CMORE field (by id or name, within a tag)."""
 
     event_details_key: str = FieldWithUIOptions(
@@ -133,7 +165,7 @@ class CmoreFieldMapping(pydantic.BaseModel):
     )
 
 
-class CmoreTagMapping(pydantic.BaseModel):
+class CmoreTagMapping(PortalSchema):
     """Map a Gundi event_type to a CMORE tag (by id or name) and its fields."""
 
     event_type: str = FieldWithUIOptions(
@@ -176,7 +208,7 @@ class CmoreTagMapping(pydantic.BaseModel):
     )
 
 
-class SubjectAffiliationMapping(pydantic.BaseModel):
+class SubjectAffiliationMapping(PortalSchema):
     """Map a Gundi subject_type/subject_subtype to a C-more affiliation."""
 
     subject_type: str = FieldWithUIOptions(
@@ -193,7 +225,7 @@ class SubjectAffiliationMapping(pydantic.BaseModel):
     )
 
 
-class SubjectClassificationMapping(pydantic.BaseModel):
+class SubjectClassificationMapping(PortalSchema):
     """Map a Gundi subject_type/subject_subtype to a C-more classification.
 
     The classification fields (battleDimension/force/type/role) are flattened
@@ -252,12 +284,13 @@ def _reference(action: str, params: Optional[dict] = None, *, target: str = "sel
     }
 
 
-class DeliverConfig(PushActionConfiguration):
-    """Combined config for the single action_deliver handler.
-
-    Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
-    into one config since one handler now dispatches on payload type internally.
-    """
+class DeliverConfig(PushActionConfiguration, PortalSchema):
+    # Combined config for the single action_deliver handler.
+    #
+    # Collapses the previous PushObservationsConfig (empty) and PushEventsConfig
+    # into one config since one handler now dispatches on payload type internally.
+    # (A comment, not a docstring: Pydantic would show a docstring as the
+    # form's description in the Gundi portal.)
 
     event_type_to_tag: Optional[List[CmoreTagMapping]] = FieldWithUIOptions(
         None,
@@ -459,15 +492,24 @@ class DeliverConfig(PushActionConfiguration):
         return base
 
 
-class CreateErEventTypesConfig(GenericActionConfiguration, ExecutableActionMixin):
-    """Form for the portal-triggered *Create EarthRanger event types* action.
+class CreateErEventTypesConfig(GenericActionConfiguration, ExecutableActionMixin, PortalSchema):
+    # Form for the portal-triggered *Create EarthRanger event types* action.
+    #
+    # Creates one EarthRanger event type (with choice lists) per selected CMORE
+    # tag, in a category for this integration's share group, on the EarthRanger
+    # provider connected to this destination. Generated types are delivered by
+    # naming convention, so they need no ``event_type_to_tag`` entry (design:
+    # docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
+    # The portal shows portal_description above the form (see PortalSchema).
 
-    Creates one EarthRanger event type (with choice lists) per selected CMORE
-    tag, in a category for this integration's share group, on the EarthRanger
-    provider connected to this destination. Generated types are delivered by
-    naming convention, so they need no ``event_type_to_tag`` entry (design:
-    docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
-    """
+    portal_description: ClassVar[str] = (
+        "Creates one EarthRanger event type, with its choice lists, for each "
+        "CMORE tag you select, on the EarthRanger site connected to this "
+        "destination. Events reported with these types are sent to CMORE with "
+        "no mapping to configure. Run it with Preview only first to check "
+        "permissions."
+    )
+
 
     tags: List[str] = FieldWithUIOptions(
         ...,
