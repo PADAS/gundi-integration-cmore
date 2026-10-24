@@ -1410,6 +1410,21 @@ async def action_create_er_event_types(
                         await er.patch_event_type(existing_value, payload)
                     else:
                         await er.post_event_type(payload)
+                        # Warn right after the second type appears: a later
+                        # failure (its choices, the next tag) would skip an
+                        # end-of-run warning, and the retry sees the type as
+                        # existing and never warns.
+                        if hand_mapped.get(spec.cmore_tag_id):
+                            await log_action_activity(
+                                integration_id=str(integration.id),
+                                action_id="create_er_event_types",
+                                title=(
+                                    f"{spec.display} is already mapped from "
+                                    f"{', '.join(hand_mapped[spec.cmore_tag_id])}; rangers will see both types"
+                                ),
+                                level=LogLevel.WARNING,
+                                data={"event_type": payload["value"], "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
+                            )
                 await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
             except Exception as exc:
                 # Every step is idempotent, so a re-run finishes the rest; the
@@ -1466,17 +1481,6 @@ async def action_create_er_event_types(
         },
     )
     for et in reported:
-        if et["mapped_by_hand"] and et["action"] == "created" and not dry_run:
-            await log_action_activity(
-                integration_id=str(integration.id),
-                action_id="create_er_event_types",
-                title=(
-                    f"{et['display']} is already mapped from "
-                    f"{', '.join(et['mapped_by_hand'])}; rangers will see both types"
-                ),
-                level=LogLevel.WARNING,
-                data={"event_type": et["value"], "mapped_by_hand": et["mapped_by_hand"]},
-            )
         if et["skipped"]:
             await log_action_activity(
                 integration_id=str(integration.id),

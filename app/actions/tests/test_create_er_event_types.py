@@ -556,3 +556,26 @@ async def test_overlap_warning_is_logged_only_when_the_type_is_created(integrati
     assert rerun["event_types"][0]["action"] == "updated"
     assert rerun["event_types"][0]["mapped_by_hand"] == ["poacher_evidence"]
     assert overlap_warnings() == []
+
+
+
+@pytest.mark.asyncio
+async def test_overlap_warning_survives_a_failure_after_the_type_is_created(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """The type is created, then writing its choices fails. The retry finds
+    the type as existing ("updated") and would never warn, so the warning
+    must already be in the activity log from the failed run."""
+    import httpx
+
+    integration = _with_deliver_mappings(integration, [{"event_type": "poacher_evidence", "tag": "20"}])
+    request = httpx.Request("POST", "https://site.pamdas.org/api/v1.0/choices/")
+    mock_er_admin.post_choice.side_effect = httpx.HTTPStatusError(
+        "boom", request=request, response=httpx.Response(500, request=request)
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.post_event_type.assert_awaited_once()
+    warnings = [c for c in activity_log.await_args_list if "already mapped" in c.kwargs.get("title", "")]
+    assert len(warnings) == 1
+    assert warnings[0].kwargs["data"]["mapped_by_hand"] == ["poacher_evidence"]
+    assert warnings[0].kwargs["data"]["event_type"] == "cmore_7932_20_evidence_of_poacher"
