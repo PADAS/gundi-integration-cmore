@@ -1248,10 +1248,9 @@ def _raw_tags_by_id(raw_response: list) -> Dict[int, dict]:
     }
 
 
-def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
+def _resolve_tag_refs(refs: List[str], raw_response: list, index: TagIndexData) -> List[dict]:
     """Each configured tag ref (id or exact name) → its raw tag entry.
     Any unknown ref fails the whole run before anything is written."""
-    index = _build_index(raw_response)
     by_id = _raw_tags_by_id(raw_response)
     resolved: List[dict] = []
     unknown: List[str] = []
@@ -1267,6 +1266,36 @@ def _resolve_tag_refs(refs: List[str], raw_response: list) -> List[dict]:
             f"{len(unknown)} configured CMORE tag(s) not found on this instance"
         )
     return resolved
+
+
+def _hand_mapped_event_types(integration: Integration, index: TagIndexData, group: int) -> Dict[int, List[str]]:
+    """Per CMORE tag id, the event types the saved Deliver config routes to it
+    by an explicit entry (sorted), read the way delivery reads them: through
+    DeliverConfig, and only the first entry per event type. An entry for one
+    of this group's generated types counts only when it routes that type to
+    a tag other than its own (delivery lets the explicit entry win). Tag refs
+    that do not resolve are ignored; an invalid Deliver config yields none."""
+    deliver = integration.get_action_config("deliver")
+    if not deliver or not deliver.data:
+        return {}
+    try:
+        mappings = DeliverConfig.parse_obj(deliver.data).event_type_to_tag or []
+    except pydantic.ValidationError:
+        logger.warning("Saved Deliver config does not validate; skipping the hand-mapping overlap check.")
+        return {}
+    found: Dict[int, set] = {}
+    seen_event_types = set()
+    for mapping in mappings:
+        if mapping.event_type in seen_event_types:
+            continue  # delivery uses the first entry per event type
+        seen_event_types.add(mapping.event_type)
+        tag_info = index.resolve(mapping.tag)
+        if tag_info is None:
+            continue
+        if parse_generated_event_type(mapping.event_type, group) == tag_info.id:
+            continue  # the generated type mapped to its own tag is not an overlap
+        found.setdefault(tag_info.id, set()).add(mapping.event_type)
+    return {tag_id: sorted(types) for tag_id, types in found.items()}
 
 
 def _schema_dict(schema) -> dict:
@@ -1353,8 +1382,14 @@ async def action_create_er_event_types(
     dry_run = action_config.dry_run
 
     async with CmoreClient(base_url=auth.base_url, token=auth.token.get_secret_value()) as cmore:
-        raw_tags = _resolve_tag_refs(action_config.tags, await cmore.get_tags())
+        raw_response = await cmore.get_tags()
+    tag_index_data = _build_index(raw_response)
+    raw_tags = _resolve_tag_refs(action_config.tags, raw_response, tag_index_data)
     specs = [build_event_type_spec(raw, group) for raw in raw_tags]
+    # Tags already mapped from a hand-built ER type are still generated; the
+    # result names the existing types so the operator can decide which one
+    # rangers should use, and the activity log warns when a second type appears.
+    hand_mapped = _hand_mapped_event_types(integration, tag_index_data, group)
 
     provider = await _resolve_er_provider(integration)
     async with ErAdminClient(
@@ -1377,6 +1412,21 @@ async def action_create_er_event_types(
                         await er.patch_event_type(existing_value, payload)
                     else:
                         await er.post_event_type(payload)
+                        # Warn right after the second type appears: a later
+                        # failure (its choices, the next tag) would skip an
+                        # end-of-run warning, and the retry sees the type as
+                        # existing and never warns.
+                        if hand_mapped.get(spec.cmore_tag_id):
+                            await log_action_activity(
+                                integration_id=str(integration.id),
+                                action_id="create_er_event_types",
+                                title=(
+                                    f"{spec.display} is already mapped from "
+                                    f"{', '.join(hand_mapped[spec.cmore_tag_id])}; rangers will see both types"
+                                ),
+                                level=LogLevel.WARNING,
+                                data={"event_type": payload["value"], "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
+                            )
                 await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
             except Exception as exc:
                 # Every step is idempotent, so a re-run finishes the rest; the
@@ -1409,6 +1459,7 @@ async def action_create_er_event_types(
                 "fields": len(spec.fields),
                 "skipped": [f.dict() for f in spec.skipped],
                 "shallow_fields": [f.dict() for f in spec.shallow_fields],
+                "mapped_by_hand": hand_mapped.get(spec.cmore_tag_id, []),
             })
 
     result = {
