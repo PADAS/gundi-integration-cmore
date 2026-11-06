@@ -244,25 +244,107 @@ def test_choice_records_shape():
                        "display": "Abalone Harvesting", "is_active": True, "ordernum": 1}
 
 
-def test_plan_field_choices_create_update_deactivate_unchanged():
-    from app.datasource.er_event_types import plan_field_choices
+def _site_schema():
+    """An Evidence of Poacher type as a reserve left it after editing: a
+    shortened title, a hidden field, a conditional section, an extra field
+    of their own, and CAS Number deleted."""
+    return {
+        "json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "unevaluatedProperties": False,
+            "properties": {
+                "f261_evidence_type": {"type": "array", "title": "Evidence", "deprecated": False,
+                                       "uniqueItems": True, "items": {"type": "string", "anyOf": [{"$ref": "/api/v2.0/schemas/choices.json?field=f261_evidence_type"}]}},
+                "f263_evidence_bag_no": {"type": "string", "title": "Evidence Bag No", "deprecated": True},
+                "f264_number_of_snares_found": {"type": "number", "title": "Snares", "deprecated": False},
+                "ranger_notes": {"type": "string", "title": "Ranger notes", "deprecated": False},
+            },
+            "required": ["ranger_notes"],
+            "allOf": [{"if": {"properties": {"f261_evidence_type": {"contains": {"const": "snare"}}}},
+                       "then": {"properties": {}, "required": []}, "x-section": "section-2"}],
+        },
+        "ui": {
+            "fields": {
+                "f261_evidence_type": {"type": "CHOICE_LIST", "inputType": "DROPDOWN", "parent": "section-1"},
+                "f263_evidence_bag_no": {"type": "TEXT", "inputType": "SHORT_TEXT", "parent": "section-1"},
+                "f264_number_of_snares_found": {"type": "NUMERIC", "parent": "section-2"},
+                "ranger_notes": {"type": "TEXT", "inputType": "LONG_TEXT", "parent": "section-2"},
+            },
+            "headers": {},
+            "order": ["section-1", "section-2"],
+            "sections": {
+                "section-1": {"label": "Evidence", "columns": 1, "isActive": True,
+                              "leftColumn": [{"name": "f261_evidence_type", "type": "field"}, {"name": "f263_evidence_bag_no", "type": "field"}],
+                              "rightColumn": []},
+                "section-2": {"label": "Snares", "columns": 1, "isActive": True,
+                              "leftColumn": [{"name": "f264_number_of_snares_found", "type": "field"}, {"name": "ranger_notes", "type": "field"}],
+                              "rightColumn": []},
+            },
+        },
+    }
+
+
+def test_merge_keeps_every_site_edit_and_adds_only_new_cmore_fields():
+    import copy
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)  # fields 261..265 (260 Reported By skipped)
+    site = _site_schema()
+    existing_keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+    known = {261, 262, 263, 264}  # 262 (CAS Number) was generated and the reserve deleted it; 265 is new in CMORE
+
+    merged, added, removed_by_site = merge_event_type_schema(spec, site, existing_keys, known)
+
+    assert [f.cmore_field_id for f in added] == [265]
+    assert [f.cmore_field_id for f in removed_by_site] == [262]
+    before = _site_schema()
+    for key in ("f261_evidence_type", "f263_evidence_bag_no", "f264_number_of_snares_found", "ranger_notes"):
+        assert merged["json"]["properties"][key] == before["json"]["properties"][key]
+        assert merged["ui"]["fields"][key] == before["ui"]["fields"][key]
+    assert merged["json"]["allOf"] == before["json"]["allOf"]
+    assert merged["ui"]["order"] == before["ui"]["order"]
+    assert "f262_cas_number" not in merged["json"]["properties"]
+    assert merged["json"]["properties"]["f265_sap_13"] == {"type": "string", "title": "SAP 13", "deprecated": False}
+    assert merged["ui"]["fields"]["f265_sap_13"]["parent"] == "section-2"  # appended to the last section
+    assert merged["ui"]["sections"]["section-2"]["leftColumn"][-1] == {"name": "f265_sap_13", "type": "field"}
+    assert merged["ui"]["sections"]["section-1"] == before["ui"]["sections"]["section-1"]
+    assert merged["json"]["required"] == ["ranger_notes"]
+    assert site == before  # the input is not modified
+
+
+def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+    merged, added, removed = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264, 265})
+    assert added == [] and merged == _site_schema()
+    assert sorted(f.cmore_field_id for f in removed) == [262, 265]
+
+
+def test_merge_onto_a_minimal_schema_creates_the_section():
+    from app.datasource.er_event_types import SECTION_ID, build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    merged, added, _ = merge_event_type_schema(spec, {"json": {"properties": {}}, "ui": {}}, {}, set())
+    assert len(added) == len(spec.fields)
+    assert merged["ui"]["order"] == [SECTION_ID]
+    assert [c["name"] for c in merged["ui"]["sections"][SECTION_ID]["leftColumn"]] == [f.key for f in spec.fields]
+
+
+def test_plan_choice_additions_only_adds_and_reports_stale():
+    from app.datasource.er_event_types import plan_choice_additions
 
     desired = [{"model": "activity.event", "field": "f", "value": "a", "display": "A", "is_active": True, "ordernum": 1},
                {"model": "activity.event", "field": "f", "value": "b", "display": "B", "is_active": True, "ordernum": 2}]
-    existing = [{"id": "1", "value": "a", "display": "A", "is_active": True, "ordernum": 1},
-                {"id": "2", "value": "b", "display": "old", "is_active": True, "ordernum": 2},
-                {"id": "3", "value": "c", "display": "C", "is_active": True, "ordernum": 3}]
-    ops = {op.value: op for op in plan_field_choices(existing, desired)}
-    assert ops["a"].action == "unchanged"
-    assert ops["b"].action == "update" and ops["b"].choice_id == "2" and ops["b"].payload == {"display": "B", "is_active": True}
-    assert ops["c"].action == "deactivate" and ops["c"].choice_id == "3" and ops["c"].payload == {"is_active": False}
-    assert plan_field_choices([], desired)[0].action == "create"
-    assert plan_field_choices([], desired)[0].payload == desired[0]
+    existing = [{"id": "1", "value": "a", "display": "A, shortened by the reserve", "is_active": True, "ordernum": 9},
+                {"id": "3", "value": "c", "display": "C", "is_active": True, "ordernum": 3},
+                {"id": "4", "value": "d", "display": "D", "is_active": False, "ordernum": 4}]
+    creates, stale = plan_choice_additions(existing, desired)
+    assert creates == [desired[1]]
+    assert stale == ["c"]  # active, not in CMORE; inactive extras are not reported
+    assert plan_choice_additions([], desired) == (desired, [])
 
 
-def test_plan_leaves_server_order_alone_when_visible_order_already_matches():
-    from app.datasource.er_event_types import plan_field_choices
-
-    desired = [{"model": "activity.event", "field": "f", "value": "a", "display": "A", "is_active": True, "ordernum": 1}]
-    existing = [{"id": "1", "value": "a", "display": "A", "is_active": True, "ordernum": 10}]
-    assert plan_field_choices(existing, desired)[0].action == "unchanged"

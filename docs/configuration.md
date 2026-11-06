@@ -307,9 +307,33 @@ EarthRanger.
 can serve several CMORE share groups: each CMORE integration delivers only
 the types that carry *its* group and skips the others as unmapped. The slug
 is cosmetic; on a re-run existing objects are matched by the id prefix, so a
-CMORE rename updates the display name but never creates a second type or
-field. Nothing in EarthRanger is ever deleted: deselected tags are left
-alone and dropped options are deactivated.
+CMORE rename never creates a second type or field.
+
+### Re-runs keep the reserve's edits
+
+Once a generated type exists, it belongs to the reserve. A re-run only adds
+what is new in CMORE and changes nothing already on the site:
+
+- **Kept as the site has it:** the type's name, category and active state;
+  every field's title, hidden (deprecated) state and position; sections and
+  their conditions; required fields; fields the reserve added for EarthRanger
+  only; and every dropdown option's wording, order and active state.
+- **Added:** a CMORE property the type has never had becomes a new field at
+  the end of the last section, and a new CMORE option is added to its list.
+- **Not brought back:** a generated field the reserve deleted stays deleted.
+  Gundi records which CMORE fields each type was built with, so a missing
+  field it built before is treated as removed on purpose. Types created
+  before this record existed (before November 2026) have none yet, so their
+  first re-run restores a deleted field once.
+- **Reported, not changed:** an active option CMORE no longer offers stays
+  on the site and is listed under `stale_options` in the result; selecting
+  it sends nothing for that field. Nothing in EarthRanger is ever deleted or
+  deactivated, and deselected tags are left alone.
+
+What the reserve must not change is a field's key (`f<fieldid>_…`) or an
+option's stored value: delivery matches on those, not on titles. The result
+of each run lists `added_fields`, `removed_by_site` and `stale_options` per
+type, and Preview only shows them before anything is written.
 
 ### Field translation
 

@@ -18,8 +18,9 @@ earthranger-cli's ``schema_gen`` / ``choices`` modules (design:
 docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
 """
 
+import copy
 import re
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Set, Tuple
 
 import pydantic
 
@@ -360,51 +361,75 @@ def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}
     return records
 
 
-class ChoiceOp(pydantic.BaseModel):
-    action: Literal["create", "update", "deactivate", "unchanged"]
-    value: str
-    payload: Optional[dict] = None  # POST/PATCH body; None for unchanged
-    choice_id: Optional[str] = None  # set for update / deactivate
-
-
-def _choice_sort_key(record: dict):
-    """Server display order: ordernum ascending, nulls last, then value."""
-    num = record.get("ordernum")
-    return (num is None, num if num is not None else 0, record.get("value") or "")
-
-
-def _differs(have: dict, want: dict, order_settled: bool) -> bool:
-    return (
-        have.get("display") != want["display"]
-        or not have.get("is_active", True)
-        or (not order_settled and have.get("ordernum") != want.get("ordernum"))
-    )
-
-
-def plan_field_choices(existing: List[dict], desired: List[dict]) -> List[ChoiceOp]:
-    """Diff one field's existing ``Choice`` records against the desired ones:
-    create missing, update changed display/order, deactivate extras. When
-    the visible (active, display-ordered) sequence already matches, the
-    server's numbering is left alone. From earthranger-cli's planner."""
-    ops: List[ChoiceOp] = []
-    existing_by_value = {c["value"]: c for c in existing}
+def plan_choice_additions(existing: List[dict], desired: List[dict]) -> Tuple[List[dict], List[str]]:
+    """The choices to create for one field, and the active values on the site
+    that CMORE no longer offers. Existing choices are never changed: their
+    wording, order and active state are the reserve's (a re-run keeps site
+    edits). A stale value is reported, not deactivated, because a value CMORE
+    dropped cannot be told from one the reserve added."""
+    existing_values = {c.get("value") for c in existing or []}
     desired_values = {d["value"] for d in desired}
-    active = [c for c in existing if c.get("is_active", True)]
-    order_settled = [c["value"] for c in sorted(active, key=_choice_sort_key)] == [
-        d["value"] for d in desired
-    ] and all(c.get("ordernum") is not None for c in active)
-    for want in desired:
-        have = existing_by_value.get(want["value"])
-        if have is None:
-            ops.append(ChoiceOp(action="create", value=want["value"], payload=want))
-        elif _differs(have, want, order_settled):
-            payload = {"display": want["display"], "is_active": True}
-            if not order_settled and have.get("ordernum") != want.get("ordernum"):
-                payload["ordernum"] = want.get("ordernum")
-            ops.append(ChoiceOp(action="update", value=want["value"], payload=payload, choice_id=str(have["id"])))
-        else:
-            ops.append(ChoiceOp(action="unchanged", value=want["value"]))
-    for have in existing:
-        if have["value"] not in desired_values and have.get("is_active", True):
-            ops.append(ChoiceOp(action="deactivate", value=have["value"], payload={"is_active": False}, choice_id=str(have["id"])))
-    return ops
+    creates = [d for d in desired if d["value"] not in existing_values]
+    stale = [c["value"] for c in existing or [] if c.get("is_active", True) and c.get("value") not in desired_values]
+    return creates, stale
+
+
+# ----- re-run: merge onto the site's schema -----
+
+
+def merge_event_type_schema(
+    spec: EventTypeSpec,
+    site_schema: dict,
+    existing_keys: Dict[int, str],
+    known_field_ids: Set[int],
+) -> Tuple[dict, List[FieldSpec], List[FieldSpec]]:
+    """The site's schema with only CMORE fields it has never seen added.
+
+    Everything already on the site stays as the reserve left it: titles,
+    hidden (deprecated) fields, sections and their conditions, required
+    fields, and fields of their own. A CMORE field is added only when it is
+    not on the site and not in ``known_field_ids`` (the fields this type was
+    generated with before); a known field missing from the site was removed
+    by the reserve and stays removed. New fields go at the end of the last
+    section. Returns ``(schema, added, removed_by_site)``; the input is not
+    modified."""
+    schema = copy.deepcopy(site_schema or {})
+    json_part = schema.setdefault("json", {})
+    properties = json_part.setdefault("properties", {})
+    ui = schema.setdefault("ui", {})
+    ui_fields = ui.setdefault("fields", {})
+    sections = ui.setdefault("sections", {})
+    order = ui.setdefault("order", [])
+    ui.setdefault("headers", {})
+    added: List[FieldSpec] = []
+    removed_by_site: List[FieldSpec] = []
+    for field in spec.fields:
+        key = existing_keys.get(field.cmore_field_id)
+        if key and key in properties:
+            continue
+        if field.cmore_field_id in known_field_ids:
+            removed_by_site.append(field)
+            continue
+        added.append(field)
+    if not added:
+        return schema, added, removed_by_site
+    json_part.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
+    json_part.setdefault("type", "object")
+    json_part.setdefault("unevaluatedProperties", False)
+    required = json_part.setdefault("required", [])
+    if not order:
+        order.append(SECTION_ID)
+    target = order[-1]
+    section = sections.setdefault(target, {
+        "label": spec.display, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": [],
+    })
+    column = section.setdefault("leftColumn", [])
+    for field in added:
+        json_prop, ui_field = _property_pair(field, field.key)
+        ui_field["parent"] = target
+        properties[field.key] = json_prop
+        ui_fields[field.key] = ui_field
+        column.append({"name": field.key, "type": "field"})
+        if field.required and field.key not in required:
+            required.append(field.key)
+    return schema, added, removed_by_site

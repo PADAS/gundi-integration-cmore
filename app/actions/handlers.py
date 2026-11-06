@@ -30,7 +30,8 @@ from app.datasource.er_event_types import (
     generated_type_prefix,
     parse_generated_event_type,
     parse_generated_field_key,
-    plan_field_choices,
+    merge_event_type_schema,
+    plan_choice_additions,
 )
 from app.datasource.schemas import (
     CmoreClassification,
@@ -1330,7 +1331,7 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
                     field_id = parse_generated_field_key(key)
                     if field_id is not None and field_id not in keys:
                         keys[field_id] = key
-                found[spec.cmore_tag_id] = {"value": value, "keys": keys}
+                found[spec.cmore_tag_id] = {"value": value, "keys": keys, "schema": _schema_dict(et.get("schema"))}
                 break
     return found
 
@@ -1348,19 +1349,29 @@ async def _ensure_category(
     return {"value": value, "display": display, "action": "created"}
 
 
-async def _apply_choices(er: ErAdminClient, records_by_field: Dict[str, List[dict]], dry_run: bool, counts: dict) -> None:
+async def _apply_choices(
+    er: ErAdminClient, records_by_field: Dict[str, List[dict]], dry_run: bool, counts: dict
+) -> Dict[str, List[str]]:
+    """Create the options a field is missing; never change or deactivate the
+    site's own. Returns, per field key, the site's active options that CMORE
+    no longer offers."""
+    stale_by_field: Dict[str, List[str]] = {}
     for field_key_name, desired in records_by_field.items():
         existing = await er.get_choices(field_key_name)
-        for op in plan_field_choices(existing, desired):
-            if op.action == "unchanged":
-                continue
-            counts[{"create": "created", "update": "updated", "deactivate": "deactivated"}[op.action]] += 1
-            if dry_run:
-                continue
-            if op.action == "create":
-                await er.post_choice(op.payload)
-            else:
-                await er.patch_choice(op.choice_id, op.payload)
+        creates, stale = plan_choice_additions(existing, desired)
+        if stale:
+            stale_by_field[field_key_name] = stale
+        for payload in creates:
+            counts["created"] += 1
+            if not dry_run:
+                await er.post_choice(payload)
+    return stale_by_field
+
+
+# Per generated event type, the CMORE field ids it was built with, so a re-run
+# can tell a field the reserve deleted (known, missing: stays deleted) from a
+# field new in CMORE (unknown: added).
+FIELD_RECORD_ACTION_ID = "create_er_event_types"
 
 
 @action_title("Create EarthRanger event types")
@@ -1399,18 +1410,30 @@ async def action_create_er_event_types(
         existing = _existing_generated_types(await er.get_event_types(), group, specs)
         category = await _ensure_category(er, group, action_config.share_group_label, dry_run, categories)
 
-        counts = {"created": 0, "updated": 0, "deactivated": 0}
+        counts = {"created": 0}
         reported: List[dict] = []
         for spec in specs:
             prior = existing.get(spec.cmore_tag_id)
-            existing_value = prior["value"] if prior else None
             existing_keys = prior["keys"] if prior else {}
-            payload = build_event_type_payload(spec, existing_value=existing_value, existing_keys=existing_keys)
+            type_value = prior["value"] if prior else spec.value
             try:
-                if not dry_run:
-                    if prior:
-                        await er.patch_event_type(existing_value, payload)
-                    else:
+                if prior:
+                    # Re-run: the site's type is the reserve's. Keep every edit
+                    # (titles, hidden fields, sections, their own fields, the
+                    # name) and add only the CMORE fields it has never had.
+                    record = await state_manager.get_state(
+                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
+                    )
+                    known = set(record.get("field_ids") or []) or set(existing_keys)
+                    schema, added, removed_by_site = merge_event_type_schema(spec, prior["schema"], existing_keys, known)
+                    if added and not dry_run:
+                        await er.patch_event_type(type_value, {"schema": schema})
+                    action = "updated" if added else "unchanged"
+                else:
+                    payload = build_event_type_payload(spec)
+                    added, removed_by_site = list(spec.fields), []
+                    action = "created"
+                    if not dry_run:
                         await er.post_event_type(payload)
                         # Warn right after the second type appears: a later
                         # failure (its choices, the next tag) would skip an
@@ -1425,9 +1448,18 @@ async def action_create_er_event_types(
                                     f"{', '.join(hand_mapped[spec.cmore_tag_id])}; rangers will see both types"
                                 ),
                                 level=LogLevel.WARNING,
-                                data={"event_type": payload["value"], "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
+                                data={"event_type": type_value, "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
                             )
-                await _apply_choices(er, build_choice_records(spec, existing_keys), dry_run, counts)
+                removed_ids = {f.cmore_field_id for f in removed_by_site}
+                records = build_choice_records(spec, existing_keys)
+                for f in removed_by_site:
+                    records.pop(existing_keys.get(f.cmore_field_id, f.key), None)
+                stale_options = await _apply_choices(er, records, dry_run, counts)
+                if not dry_run:
+                    await state_manager.set_state(
+                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
+                        state={"field_ids": sorted(f.cmore_field_id for f in spec.fields)},
+                    )
             except Exception as exc:
                 # Every step is idempotent, so a re-run finishes the rest; the
                 # operator still needs to see how far this run got.
@@ -1440,7 +1472,7 @@ async def action_create_er_event_types(
                         "earthranger_site": provider.site_root,
                         "category": category,
                         "event_types_completed": reported,
-                        "failed_event_type": payload["value"],
+                        "failed_event_type": type_value,
                         "choices": counts,
                         "error": f"{type(exc).__name__}: {exc}",
                     },
@@ -1453,10 +1485,13 @@ async def action_create_er_event_types(
                     ) from exc
                 raise
             reported.append({
-                "value": payload["value"],
+                "value": type_value,
                 "display": spec.display,
-                "action": "updated" if prior else "created",
+                "action": action,
                 "fields": len(spec.fields),
+                "added_fields": [f.label for f in added],
+                "removed_by_site": [f.label for f in removed_by_site if f.cmore_field_id in removed_ids],
+                "stale_options": stale_options,
                 "skipped": [f.dict() for f in spec.skipped],
                 "shallow_fields": [f.dict() for f in spec.shallow_fields],
                 "mapped_by_hand": hand_mapped.get(spec.cmore_tag_id, []),
