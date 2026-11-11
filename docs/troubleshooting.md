@@ -51,6 +51,20 @@ The source value didn't resolve to a valid CMORE option. Add a **value mapping**
 The [`scaffold-mapping`](configuration.md#scaffolding-mappings-cli-alternative) tool surfaces
 these to fill in.
 
+## A dropdown value arrives in CMORE empty
+
+The event reaches CMORE, but one dropdown field on it is blank, and the runner
+log shows the value was dropped (as above). On a generated event type, the
+usual cause is an option CMORE has since removed: re-runs of *Create
+EarthRanger event types* keep the reserve's options and never switch one off,
+so rangers can still pick it.
+
+1. Run *Create EarthRanger event types* with **Preview** on and look at
+   `stale_options` in the result. It lists each active option CMORE no longer
+   offers, by field.
+2. For each one, either switch the option off in EarthRanger, or add a value
+   mapping from it to the CMORE option that replaced it.
+
 ## An event is skipped as unmapped
 
 Activity log entry (Gundi portal → the CMORE connection → Activity), at

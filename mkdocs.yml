@@ -19,6 +19,7 @@ nav:
   - Tutorial — Sync an Event Type: tutorial-sync-event-type.md
   - Configuration: configuration.md
   - Troubleshooting: troubleshooting.md
+  - Changelog: changelog.md
 
 markdown_extensions:
   - admonition
@@ -40,4 +41,5 @@ exclude_docs: |
   rfc-reference-data-portal-support.md
   Untitled.md
   superpowers/
+  support/
   slides/

@@ -326,9 +326,16 @@ what is new in CMORE and changes nothing already on the site:
   before this record existed (before November 2026) have none yet, so their
   first re-run restores a deleted field once.
 - **Reported, not changed:** an active option CMORE no longer offers stays
-  on the site and is listed under `stale_options` in the result; selecting
-  it sends nothing for that field. Nothing in EarthRanger is ever deleted or
-  deactivated, and deselected tags are left alone.
+  on the site and is listed under `stale_options` in the result. Rangers
+  can still pick it, but CMORE no longer knows it, so the field arrives in
+  CMORE empty, with only a warning in the runner log. **Check
+  `stale_options` after every run** and switch each listed option off in
+  EarthRanger, or map it to its replacement (see
+  [Troubleshooting](troubleshooting.md#a-dropdown-value-arrives-in-cmore-empty)).
+  Nothing in EarthRanger is ever deleted or deactivated, and deselected tags
+  are left alone.
+- **Not renamed:** a tag or property renamed in CMORE keeps its old name on
+  the site. Delivery matches on ids, so it is unaffected.
 
 What the reserve must not change is a field's key (`f<fieldid>_…`) or an
 option's stored value: delivery matches on those, not on titles. The result
