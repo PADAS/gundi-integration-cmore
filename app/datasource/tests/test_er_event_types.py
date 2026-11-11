@@ -289,7 +289,8 @@ def test_merge_keeps_every_site_edit_and_adds_only_new_cmore_fields():
     existing_keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
     known = {261, 262, 263, 264}  # 262 (CAS Number) was generated and the reserve deleted it; 265 is new in CMORE
 
-    merged, added, removed_by_site = merge_event_type_schema(spec, site, existing_keys, known)
+    result = merge_event_type_schema(spec, site, existing_keys, known)
+    merged, added, removed_by_site = result.schema, result.added, result.removed_by_site
 
     assert [f.cmore_field_id for f in added] == [265]
     assert [f.cmore_field_id for f in removed_by_site] == [262]
@@ -318,7 +319,7 @@ def test_merge_adds_its_own_section_when_no_section_always_shows():
     site["ui"]["sections"]["section-1"]["isActive"] = False  # switched off; section-2 is conditional
     keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
 
-    merged, added, _ = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264})
+    merged = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264}).schema
 
     assert merged["ui"]["order"] == ["section-1", "section-2", ADDED_SECTION_ID]
     section = merged["ui"]["sections"][ADDED_SECTION_ID]
@@ -328,9 +329,30 @@ def test_merge_adds_its_own_section_when_no_section_always_shows():
 
     # A later run reuses that section rather than adding another.
     # (262 is treated as new this time.)
-    again, _, _ = merge_event_type_schema(spec, merged, {**keys, 265: "f265_sap_13"}, {261, 263, 264, 265})
+    again = merge_event_type_schema(spec, merged, {**keys, 265: "f265_sap_13"}, {261, 263, 264, 265}).schema
     assert again["ui"]["order"].count(ADDED_SECTION_ID) == 1
     assert [c["name"] for c in again["ui"]["sections"][ADDED_SECTION_ID]["leftColumn"]] == ["f265_sap_13", "f262_cas_number"]
+
+
+def test_merge_reuses_the_cmore_section_even_when_the_reserve_switched_it_off():
+    """The reserve may hide "New from CMORE" too. A later run must append
+    to it as it is, not re-create it active or list it twice."""
+    from app.datasource.er_event_types import ADDED_SECTION_ID, build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    site["ui"]["sections"]["section-1"]["isActive"] = False
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+    first = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264}).schema
+    first["ui"]["sections"][ADDED_SECTION_ID]["isActive"] = False
+
+    again = merge_event_type_schema(spec, first, {**keys, 265: "f265_sap_13"}, {261, 263, 264, 265}).schema
+
+    assert again["ui"]["order"] == ["section-1", "section-2", ADDED_SECTION_ID]
+    section = again["ui"]["sections"][ADDED_SECTION_ID]
+    assert section["isActive"] is False
+    assert [c["name"] for c in section["leftColumn"]] == ["f265_sap_13", "f262_cas_number"]
+    assert again["ui"]["fields"]["f262_cas_number"]["parent"] == ADDED_SECTION_ID
 
 
 def test_merge_never_makes_an_added_field_required():
@@ -342,10 +364,10 @@ def test_merge_never_makes_an_added_field_required():
     spec.fields = [f.copy(update={"required": True}) if f.cmore_field_id == 265 else f for f in spec.fields]
     keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
 
-    merged, added, _ = merge_event_type_schema(spec, _site_schema(), keys, {261, 262, 263, 264})
+    result = merge_event_type_schema(spec, _site_schema(), keys, {261, 262, 263, 264})
 
-    assert [f.cmore_field_id for f in added] == [265]
-    assert merged["json"]["required"] == ["ranger_notes"]
+    assert [f.cmore_field_id for f in result.added] == [265]
+    assert result.schema["json"]["required"] == ["ranger_notes"]
 
 
 def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
@@ -354,19 +376,19 @@ def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
     spec = build_event_type_spec(_tag(20), 7932)
     site = _site_schema()
     keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
-    merged, added, removed = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264, 265})
-    assert added == [] and merged == _site_schema()
-    assert sorted(f.cmore_field_id for f in removed) == [262, 265]
+    result = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264, 265})
+    assert result.added == [] and result.schema == _site_schema()
+    assert sorted(f.cmore_field_id for f in result.removed_by_site) == [262, 265]
 
 
-def test_merge_onto_a_minimal_schema_creates_the_section():
-    from app.datasource.er_event_types import SECTION_ID, build_event_type_spec, merge_event_type_schema
+@pytest.mark.parametrize("site", [None, {}, {"json": "{}"}, {"json": {"properties": {}}, "ui": {}}])
+def test_merge_refuses_a_site_schema_with_no_fields(site):
+    """Merging onto an empty form would rebuild it from CMORE and replace
+    the reserve's; the caller must skip the type instead."""
+    from app.datasource.er_event_types import SiteSchemaUnreadable, build_event_type_spec, merge_event_type_schema
 
-    spec = build_event_type_spec(_tag(20), 7932)
-    merged, added, _ = merge_event_type_schema(spec, {"json": {"properties": {}}, "ui": {}}, {}, set())
-    assert len(added) == len(spec.fields)
-    assert merged["ui"]["order"] == [SECTION_ID]
-    assert [c["name"] for c in merged["ui"]["sections"][SECTION_ID]["leftColumn"]] == [f.key for f in spec.fields]
+    with pytest.raises(SiteSchemaUnreadable):
+        merge_event_type_schema(build_event_type_spec(_tag(20), 7932), site, {}, set())
 
 
 def test_plan_choice_additions_only_adds_and_reports_stale():
@@ -377,9 +399,10 @@ def test_plan_choice_additions_only_adds_and_reports_stale():
     existing = [{"id": "1", "value": "a", "display": "A, shortened by the reserve", "is_active": True, "ordernum": 9},
                 {"id": "3", "value": "c", "display": "C", "is_active": True, "ordernum": 3},
                 {"id": "4", "value": "d", "display": "D", "is_active": False, "ordernum": 4}]
-    creates, stale = plan_choice_additions(existing, desired)
+    plan = plan_choice_additions(existing, desired)
+    creates, stale = plan.creates, plan.stale
     assert creates == [desired[1]]
     assert stale == ["c"]  # active, not in CMORE; inactive extras are not reported
-    assert plan_choice_additions([], desired) == (desired, [])
+    assert plan_choice_additions([], desired).dict() == {"creates": desired, "stale": []}
 
 

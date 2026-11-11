@@ -523,7 +523,7 @@ async def test_the_record_of_generated_fields_is_written_after_a_run_not_a_previ
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("schema", [None, "not json", {}, {"json": {"properties": {}}, "ui": {}}])
+@pytest.mark.parametrize("schema", [None, "not json", {}, {"json": "{}"}, {"json": {"properties": "x"}}, {"json": {"properties": {}}, "ui": {}}])
 async def test_rerun_skips_a_type_whose_schema_cannot_be_read(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state, schema):
     """With no readable schema every CMORE field would look new, and the
     update would replace the reserve's whole form. Skip the type instead."""

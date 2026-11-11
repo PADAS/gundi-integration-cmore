@@ -30,6 +30,8 @@ from app.datasource.er_event_types import (
     generated_type_prefix,
     parse_generated_event_type,
     parse_generated_field_key,
+    ExistingType,
+    SiteSchemaUnreadable,
     merge_event_type_schema,
     plan_choice_additions,
 )
@@ -1300,25 +1302,29 @@ def _hand_mapped_event_types(integration: Integration, index: TagIndexData, grou
 
 
 def _schema_dict(schema) -> dict:
-    """An event type's schema as a dict. EarthRanger's v2 listing returns it
-    as a JSON string; anything unparseable reads as empty, so the type is
-    treated as having no generated fields rather than failing the run."""
-    if isinstance(schema, dict):
-        return schema
+    """An event type's schema as a dict with ``json.properties`` a dict.
+    EarthRanger's v2 listing returns it as a JSON string; anything
+    unparseable, at any level, reads as empty, so the type is treated as
+    having no generated fields rather than failing the run."""
     if isinstance(schema, str):
         try:
-            parsed = json.loads(schema)
+            schema = json.loads(schema)
         except ValueError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+            schema = {}
+    if not isinstance(schema, dict):
+        schema = {}
+    if not isinstance(schema.get("json"), dict):
+        schema["json"] = {}
+    if not isinstance(schema["json"].get("properties"), dict):
+        schema["json"]["properties"] = {}
+    return schema
 
 
-def _existing_generated_types(existing: List[dict], group: int, specs: List[EventTypeSpec]) -> Dict[int, dict]:
+def _existing_generated_types(existing: List[dict], group: int, specs: List[EventTypeSpec]) -> Dict[int, ExistingType]:
     """Per CMORE tag id, the EarthRanger event type that already carries its
     id prefix, with the existing field key for each CMORE field id. Matched
     by prefix, never by slug, so renames reuse the object (Decision 6)."""
-    found: Dict[int, dict] = {}
+    found: Dict[int, ExistingType] = {}
     for spec in specs:
         prefix = generated_type_prefix(group, spec.cmore_tag_id)
         bare = prefix.rstrip("_")
@@ -1326,13 +1332,12 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
             value = str(et.get("value") or "")
             if value == bare or value.startswith(prefix):
                 schema = _schema_dict(et.get("schema"))
-                properties = (schema.get("json") or {}).get("properties") or {}
                 keys = {}
-                for key in properties:
+                for key in schema["json"]["properties"]:
                     field_id = parse_generated_field_key(key)
                     if field_id is not None and field_id not in keys:
                         keys[field_id] = key
-                found[spec.cmore_tag_id] = {"value": value, "keys": keys, "schema": schema}
+                found[spec.cmore_tag_id] = ExistingType(value=value, keys=keys, schema=schema)
                 break
     return found
 
@@ -1359,10 +1364,10 @@ async def _apply_choices(
     stale_by_field: Dict[str, List[str]] = {}
     for field_key_name, desired in records_by_field.items():
         existing = await er.get_choices(field_key_name)
-        creates, stale = plan_choice_additions(existing, desired)
-        if stale:
-            stale_by_field[field_key_name] = stale
-        for payload in creates:
+        plan = plan_choice_additions(existing, desired)
+        if plan.stale:
+            stale_by_field[field_key_name] = plan.stale
+        for payload in plan.creates:
             counts["created"] += 1
             if not dry_run:
                 await er.post_choice(payload)
@@ -1415,11 +1420,25 @@ async def action_create_er_event_types(
         reported: List[dict] = []
         for spec in specs:
             prior = existing.get(spec.cmore_tag_id)
-            existing_keys = prior["keys"] if prior else {}
-            type_value = prior["value"] if prior else spec.value
+            existing_keys = prior.keys if prior else {}
+            type_value = prior.value if prior else spec.value
             try:
-                if prior and not ((prior["schema"].get("json") or {}).get("properties")):
-                    # No readable schema: every CMORE field would look new and
+                if prior:
+                    # Re-run: the site's type is the reserve's. Keep every edit
+                    # (titles, hidden fields, sections, their own fields, the
+                    # name) and add only the CMORE fields it has never had.
+                    record = await state_manager.get_state(
+                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
+                    )
+                    known = set(record.get("field_ids") or []) or set(existing_keys)
+                    try:
+                        merge = merge_event_type_schema(spec, prior.schema, existing_keys, known)
+                    except SiteSchemaUnreadable:
+                        merge = None
+                else:
+                    known, merge = set(), None
+                if prior and merge is None:
+                    # No readable form: every CMORE field would look new and
                     # the update would replace the reserve's whole form.
                     await log_action_activity(
                         integration_id=str(integration.id),
@@ -1436,18 +1455,10 @@ async def action_create_er_event_types(
                         "mapped_by_hand": hand_mapped.get(spec.cmore_tag_id, []),
                     })
                     continue
-                known: set = set()
-                if prior:
-                    # Re-run: the site's type is the reserve's. Keep every edit
-                    # (titles, hidden fields, sections, their own fields, the
-                    # name) and add only the CMORE fields it has never had.
-                    record = await state_manager.get_state(
-                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
-                    )
-                    known = set(record.get("field_ids") or []) or set(existing_keys)
-                    schema, added, removed_by_site = merge_event_type_schema(spec, prior["schema"], existing_keys, known)
+                if merge is not None:
+                    added, removed_by_site = merge.added, merge.removed_by_site
                     if added and not dry_run:
-                        await er.patch_event_type(type_value, {"schema": schema})
+                        await er.patch_event_type(type_value, {"schema": merge.schema})
                     action = "updated" if added else "unchanged"
                 else:
                     payload = build_event_type_payload(spec)

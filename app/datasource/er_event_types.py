@@ -20,7 +20,7 @@ docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
 
 import copy
 import re
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Dict, List, Literal, Optional, Set
 
 import pydantic
 
@@ -359,45 +359,89 @@ def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}
     return records
 
 
-def plan_choice_additions(existing: List[dict], desired: List[dict]) -> Tuple[List[dict], List[str]]:
-    """The choices to create for one field, and the active values on the site
-    that CMORE no longer offers. Existing choices are never changed: their
-    wording, order and active state are the reserve's (a re-run keeps site
-    edits). A stale value is reported, not deactivated, because a value CMORE
-    dropped cannot be told from one the reserve added."""
+class ChoicePlan(pydantic.BaseModel):
+    """What a field's option list needs: ``creates`` are the choice payloads
+    the site is missing; ``stale`` are its active values CMORE no longer
+    offers (reported, never deactivated: they may be the reserve's own)."""
+    creates: List[dict]
+    stale: List[str]
+
+
+def plan_choice_additions(existing: List[dict], desired: List[dict]) -> ChoicePlan:
     existing_values = {c.get("value") for c in existing or []}
     desired_values = {d["value"] for d in desired}
-    creates = [d for d in desired if d["value"] not in existing_values]
-    stale = [c["value"] for c in existing or [] if c.get("is_active", True) and c.get("value") not in desired_values]
-    return creates, stale
+    return ChoicePlan(
+        creates=[d for d in desired if d["value"] not in existing_values],
+        stale=[c["value"] for c in existing or [] if c.get("is_active", True) and c.get("value") not in desired_values],
+    )
 
 
 # ----- re-run: merge onto the site's schema -----
 
 
+class ExistingType(pydantic.BaseModel):
+    """A generated event type already on the site: its value, the field key
+    the site holds for each CMORE field id, and its schema as a dict."""
+    value: str
+    keys: Dict[int, str]
+    schema_: dict = pydantic.Field(alias="schema")
+
+    class Config:
+        allow_population_by_field_name = True
+
+    @property
+    def schema(self) -> dict:  # ``schema`` is taken by BaseModel.schema()
+        return self.schema_
+
+
+class SiteSchemaUnreadable(ValueError):
+    """The site returned no form to merge onto; see ``merge_event_type_schema``."""
+
+
+class MergeResult(pydantic.BaseModel):
+    schema_: dict = pydantic.Field(alias="schema")
+    added: List[FieldSpec]
+    removed_by_site: List[FieldSpec]
+
+    class Config:
+        allow_population_by_field_name = True
+
+    @property
+    def schema(self) -> dict:  # ``schema`` is taken by BaseModel.schema()
+        return self.schema_
+
+
 def merge_event_type_schema(
     spec: EventTypeSpec,
-    site_schema: dict,
+    site_schema: Optional[dict],
     existing_keys: Dict[int, str],
     known_field_ids: Set[int],
-) -> Tuple[dict, List[FieldSpec], List[FieldSpec]]:
+) -> MergeResult:
     """The site's schema with only CMORE fields it has never seen added.
 
     Everything already on the site stays as the reserve left it: titles,
     hidden (deprecated) fields, sections and their conditions, required
     fields, and fields of their own. A CMORE field is added only when it is
-    not on the site and not in ``known_field_ids`` (the fields this type was
-    generated with before); a known field missing from the site was removed
-    by the reserve and stays removed.
+    not on the site (``existing_keys``, derived from the site's properties)
+    and not in ``known_field_ids`` (the fields this type was generated with
+    before); a known field missing from the site was removed by the reserve
+    and stays removed.
 
     New fields go at the end of the last section that always shows (active,
-    with no condition), else in a section of their own. They are never made
-    required: on a form the reserve has shaped, a required field that is
-    hidden or behind a condition would block every report. Returns
-    ``(schema, added, removed_by_site)``; the input is not modified."""
-    schema = copy.deepcopy(site_schema or {})
-    json_part = schema.setdefault("json", {})
-    properties = json_part.setdefault("properties", {})
+    with no condition), else in a section of their own, which later runs
+    reuse as the reserve left it. They are never made required: on a form
+    the reserve has shaped, a required field that is hidden or behind a
+    condition would block every report.
+
+    Raises ``SiteSchemaUnreadable`` when the site's schema has no fields:
+    merging onto an empty form would rebuild it from CMORE and replace the
+    reserve's. The input is not modified."""
+    if not isinstance(site_schema, dict) or not isinstance(site_schema.get("json"), dict) \
+            or not isinstance(site_schema["json"].get("properties"), dict) or not site_schema["json"]["properties"]:
+        raise SiteSchemaUnreadable(f"{spec.value}: the site returned no form with fields to merge onto")
+    schema = copy.deepcopy(site_schema)
+    json_part = schema["json"]
+    properties = json_part["properties"]
     ui = schema.setdefault("ui", {})
     ui_fields = ui.setdefault("fields", {})
     sections = ui.setdefault("sections", {})
@@ -406,24 +450,27 @@ def merge_event_type_schema(
     added: List[FieldSpec] = []
     removed_by_site: List[FieldSpec] = []
     for field in spec.fields:
-        key = existing_keys.get(field.cmore_field_id)
-        if key and key in properties:
+        if field.cmore_field_id in existing_keys:
             continue
         if field.cmore_field_id in known_field_ids:
             removed_by_site.append(field)
             continue
         added.append(field)
     if not added:
-        return schema, added, removed_by_site
+        return MergeResult(schema=schema, added=added, removed_by_site=removed_by_site)
     json_part.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
     json_part.setdefault("type", "object")
     json_part.setdefault("unevaluatedProperties", False)
     target = _section_for_added_fields(json_part, sections, order)
     if target is None:
-        target = SECTION_ID if not order else ADDED_SECTION_ID
-        label = spec.display if not order else ADDED_SECTION_LABEL
-        order.append(target)
-        sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
+        if ADDED_SECTION_ID in sections:
+            target = ADDED_SECTION_ID  # ours from an earlier run, however the reserve left it
+        else:
+            target = SECTION_ID if not order else ADDED_SECTION_ID
+            label = spec.display if not order else ADDED_SECTION_LABEL
+            sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
+        if target not in order:
+            order.append(target)
     column = sections[target].setdefault("leftColumn", [])
     for field in added:
         json_prop, ui_field = _property_pair(field, field.key)
@@ -431,7 +478,7 @@ def merge_event_type_schema(
         properties[field.key] = json_prop
         ui_fields[field.key] = ui_field
         column.append({"name": field.key, "type": "field"})
-    return schema, added, removed_by_site
+    return MergeResult(schema=schema, added=added, removed_by_site=removed_by_site)
 
 
 def _section_for_added_fields(json_part: dict, sections: dict, order: List[str]) -> Optional[str]:
