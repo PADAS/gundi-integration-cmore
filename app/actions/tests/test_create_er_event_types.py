@@ -628,6 +628,29 @@ async def test_the_record_is_written_before_the_choices_so_a_choice_failure_keep
 
 
 @pytest.mark.asyncio
+async def test_rerun_adds_the_first_fields_to_a_type_generated_with_none(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """The record says the type was built with no fields. That is a record,
+    not a missing one: no warning, and CMORE's first fields are added."""
+    from gundi_core.schemas.v2 import LogLevel
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"] = {"json": {"properties": {}}, "ui": {}}
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": []}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    value, payload = mock_er_admin.patch_event_type.await_args.args
+    assert value == "cmore_7932_20_evidence_of_poacher"
+    assert {"f261_evidence_type", "f265_sap_13"} <= set(payload["schema"]["json"]["properties"])
+    et = result["event_types"][0]
+    assert et["action"] == "updated" and et["removed_by_site"] == []
+    assert not any("no record" in c.kwargs["title"] for c in activity_log.await_args_list if c.kwargs.get("level") == LogLevel.WARNING)
+
+
+@pytest.mark.asyncio
 async def test_rerun_without_a_record_warns_that_it_trusts_the_site(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
     """No record (a type from before records, or lost state): the fields
     on the site are taken as the known set, and the operator is told."""

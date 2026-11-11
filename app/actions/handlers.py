@@ -1428,23 +1428,25 @@ async def action_create_er_event_types(
                         integration_id=str(integration.id), action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
                         source_id=_field_record_key(provider.site_root, type_value),
                     )
-                    known = set(record.get("field_ids") or [])
-                    if not known:
+                    # A record of no fields (a tag with none supported when
+                    # the type was made) is still a record.
+                    known = set(record["field_ids"] or []) if "field_ids" in record else None
+                    if known is None:
                         # A type from before records existed, or state that
                         # was lost: the site's fields are all we know, so a
                         # field the reserve deleted comes back once.
-                        known = set(existing_keys)
                         await log_action_activity(
                             integration_id=str(integration.id),
                             action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
                             title=f"{type_value} has no record of its generated fields; trusting the site's",
                             level=LogLevel.WARNING,
-                            data={"event_type": type_value, "known_field_ids": sorted(known)},
+                            data={"event_type": type_value, "known_field_ids": sorted(existing_keys)},
                         )
                     try:
                         merge = merge_event_type_schema(spec, prior.schema, existing_keys, known)
                     except SiteSchemaUnreadable:
                         merge = None
+                    known = known if known is not None else set(existing_keys)
                 else:
                     known, merge = set(), None
                 if prior and merge is None:

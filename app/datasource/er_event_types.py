@@ -440,7 +440,7 @@ def merge_event_type_schema(
     spec: EventTypeSpec,
     site_schema: Optional[dict],
     existing_keys: Dict[int, str],
-    known_field_ids: Set[int],
+    known_field_ids: Optional[Set[int]],
 ) -> MergeResult:
     """The site's schema with only CMORE fields it has never seen added.
 
@@ -449,8 +449,9 @@ def merge_event_type_schema(
     fields, and fields of their own. A CMORE field is added only when it is
     not on the site (``existing_keys``, from ``site_field_keys``)
     and not in ``known_field_ids`` (the fields this type was generated with
-    before); a known field missing from the site was removed by the reserve
-    and stays removed.
+    before; ``None`` when there is no record of it, which is not the same as
+    a record of no fields); a known field missing from the site was removed
+    by the reserve and stays removed.
 
     New fields go at the end of the last section that always shows (active,
     with no condition), else in a section of their own, which later runs
@@ -460,7 +461,7 @@ def merge_event_type_schema(
 
     Raises ``SiteSchemaUnreadable`` when the site's schema cannot be merged
     onto: its ``json``, ``properties`` or ``ui`` parts are not objects, or it
-    has no fields and nothing is known about it (a merge would then rebuild
+    has no fields and there is no record of it (a merge would then rebuild
     the form from CMORE and replace the reserve's). The input is not
     modified; with nothing to add it is returned as is."""
     json_in = site_schema.get("json") if isinstance(site_schema, dict) else None
@@ -470,14 +471,15 @@ def merge_event_type_schema(
             or not all(isinstance(ui_in.get(part, {}), dict) for part in ("fields", "sections", "headers")) \
             or not isinstance(ui_in.get("order", []), list):
         raise SiteSchemaUnreadable(f"{spec.value}: the site's form could not be read")
-    if not any(_site_property_maps(site_schema)[1:] + [properties_in]) and not known_field_ids:
-        raise SiteSchemaUnreadable(f"{spec.value}: the site's form has no fields and none are known for it")
+    if not any(_site_property_maps(site_schema)[1:] + [properties_in]) and known_field_ids is None:
+        raise SiteSchemaUnreadable(f"{spec.value}: the site's form has no fields and there is no record of it")
+    known = known_field_ids or set()
     added: List[FieldSpec] = []
     removed_by_site: List[FieldSpec] = []
     for field in spec.fields:
         if field.cmore_field_id in existing_keys:
             continue
-        if field.cmore_field_id in known_field_ids:
+        if field.cmore_field_id in known:
             removed_by_site.append(field)
             continue
         added.append(field)

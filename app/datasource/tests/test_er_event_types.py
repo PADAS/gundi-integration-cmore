@@ -389,7 +389,7 @@ def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
 
 @pytest.mark.parametrize("site", [
     None, {}, {"json": "{}"}, {"json": {"properties": "x"}},
-    {"json": {"properties": {}}, "ui": {}},  # nothing on the site and nothing known: a rebuild, not a merge
+    {"json": {"properties": {}}, "ui": {}},  # nothing on the site and no record: a rebuild, not a merge
     {"json": {"properties": {"f261_evidence_type": {}}}, "ui": None},
     {"json": {"properties": {"f261_evidence_type": {}}}, "ui": {"sections": None}},
 ])
@@ -399,7 +399,19 @@ def test_merge_refuses_a_site_schema_it_cannot_read(site):
     from app.datasource.er_event_types import SiteSchemaUnreadable, build_event_type_spec, merge_event_type_schema
 
     with pytest.raises(SiteSchemaUnreadable):
-        merge_event_type_schema(build_event_type_spec(_tag(20), 7932), site, {}, set())
+        merge_event_type_schema(build_event_type_spec(_tag(20), 7932), site, {}, None)
+
+
+def test_merge_onto_an_empty_form_with_an_empty_record_adds_the_first_fields():
+    """A type generated when its tag had no supported field has a valid
+    empty form and a record of no fields. That record is not "no record":
+    the fields CMORE adds later go in."""
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    result = merge_event_type_schema(spec, {"json": {"properties": {}}, "ui": {}}, {}, set())
+    assert [f.cmore_field_id for f in result.added] == [f.cmore_field_id for f in spec.fields]
+    assert result.removed_by_site == []
 
 
 def test_merge_onto_a_form_the_reserve_emptied_adds_only_the_new_field():
