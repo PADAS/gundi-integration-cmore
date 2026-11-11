@@ -260,12 +260,6 @@ _SCALAR_UI: Dict[str, dict] = {
 }
 
 
-def _effective_key(field: FieldSpec, existing_keys: Dict[int, str]) -> str:
-    """The key an existing site already uses for this CMORE field, else the
-    generated one. Keys are never rewritten once created (Decision 6)."""
-    return existing_keys.get(field.cmore_field_id, field.key)
-
-
 def _property_pair(field: FieldSpec, key: str) -> tuple:
     if field.type in _SCALAR_JSON:
         json_prop = {**_SCALAR_JSON[field.type], "title": field.label, "deprecated": False}
@@ -344,7 +338,9 @@ def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}
     for field in spec.fields:
         if field.type not in ("select", "multiselect"):
             continue
-        key = _effective_key(field, existing_keys)
+        # The key the site already uses for this CMORE field, else the
+        # generated one: keys are never rewritten once created (Decision 6).
+        key = existing_keys.get(field.cmore_field_id, field.key)
         records[key] = [
             {
                 "model": CHOICE_MODEL,
@@ -372,7 +368,8 @@ def plan_choice_additions(existing: List[dict], desired: List[dict]) -> ChoicePl
     desired_values = {d["value"] for d in desired}
     return ChoicePlan(
         creates=[d for d in desired if d["value"] not in existing_values],
-        stale=[c["value"] for c in existing or [] if c.get("is_active", True) and c.get("value") not in desired_values],
+        stale=[c["value"] for c in existing or []
+               if c.get("value") and c.get("is_active", True) and c["value"] not in desired_values],
     )
 
 
@@ -392,6 +389,34 @@ class ExistingType(pydantic.BaseModel):
     @property
     def schema(self) -> dict:  # ``schema`` is taken by BaseModel.schema()
         return self.schema_
+
+
+def _site_property_maps(schema) -> List[dict]:
+    """Every ``properties`` object a site's form keeps fields in: the root,
+    and the ``then`` of each conditional section, which is where
+    EarthRanger's form builder moves a section's fields once it has a
+    condition. Parts that are not objects are left out."""
+    json_part = schema.get("json") if isinstance(schema, dict) else None
+    if not isinstance(json_part, dict):
+        return []
+    maps = [json_part.get("properties")]
+    for clause in json_part.get("allOf") or []:
+        then = clause.get("then") if isinstance(clause, dict) else None
+        if isinstance(then, dict):
+            maps.append(then.get("properties"))
+    return [m for m in maps if isinstance(m, dict)]
+
+
+def site_field_keys(schema) -> Dict[int, str]:
+    """Per CMORE field id, the key the site's form holds for it, wherever
+    the reserve has put the field."""
+    keys: Dict[int, str] = {}
+    for properties in _site_property_maps(schema):
+        for key in properties:
+            field_id = parse_generated_field_key(key)
+            if field_id is not None and field_id not in keys:
+                keys[field_id] = key
+    return keys
 
 
 class SiteSchemaUnreadable(ValueError):
@@ -422,7 +447,7 @@ def merge_event_type_schema(
     Everything already on the site stays as the reserve left it: titles,
     hidden (deprecated) fields, sections and their conditions, required
     fields, and fields of their own. A CMORE field is added only when it is
-    not on the site (``existing_keys``, derived from the site's properties)
+    not on the site (``existing_keys``, from ``site_field_keys``)
     and not in ``known_field_ids`` (the fields this type was generated with
     before); a known field missing from the site was removed by the reserve
     and stays removed.
@@ -433,20 +458,20 @@ def merge_event_type_schema(
     the reserve has shaped, a required field that is hidden or behind a
     condition would block every report.
 
-    Raises ``SiteSchemaUnreadable`` when the site's schema has no fields:
-    merging onto an empty form would rebuild it from CMORE and replace the
-    reserve's. The input is not modified."""
-    if not isinstance(site_schema, dict) or not isinstance(site_schema.get("json"), dict) \
-            or not isinstance(site_schema["json"].get("properties"), dict) or not site_schema["json"]["properties"]:
-        raise SiteSchemaUnreadable(f"{spec.value}: the site returned no form with fields to merge onto")
-    schema = copy.deepcopy(site_schema)
-    json_part = schema["json"]
-    properties = json_part["properties"]
-    ui = schema.setdefault("ui", {})
-    ui_fields = ui.setdefault("fields", {})
-    sections = ui.setdefault("sections", {})
-    order = ui.setdefault("order", [])
-    ui.setdefault("headers", {})
+    Raises ``SiteSchemaUnreadable`` when the site's schema cannot be merged
+    onto: its ``json``, ``properties`` or ``ui`` parts are not objects, or it
+    has no fields and nothing is known about it (a merge would then rebuild
+    the form from CMORE and replace the reserve's). The input is not
+    modified; with nothing to add it is returned as is."""
+    json_in = site_schema.get("json") if isinstance(site_schema, dict) else None
+    ui_in = site_schema.get("ui", {}) if isinstance(site_schema, dict) else None
+    properties_in = json_in.get("properties") if isinstance(json_in, dict) else None
+    if not isinstance(properties_in, dict) or not isinstance(ui_in, dict) \
+            or not all(isinstance(ui_in.get(part, {}), dict) for part in ("fields", "sections", "headers")) \
+            or not isinstance(ui_in.get("order", []), list):
+        raise SiteSchemaUnreadable(f"{spec.value}: the site's form could not be read")
+    if not any(_site_property_maps(site_schema)[1:] + [properties_in]) and not known_field_ids:
+        raise SiteSchemaUnreadable(f"{spec.value}: the site's form has no fields and none are known for it")
     added: List[FieldSpec] = []
     removed_by_site: List[FieldSpec] = []
     for field in spec.fields:
@@ -457,10 +482,18 @@ def merge_event_type_schema(
             continue
         added.append(field)
     if not added:
-        return MergeResult(schema=schema, added=added, removed_by_site=removed_by_site)
+        return MergeResult(schema=site_schema, added=added, removed_by_site=removed_by_site)
+    schema = copy.deepcopy(site_schema)
+    json_part = schema["json"]
+    properties = json_part["properties"]
+    ui = schema.setdefault("ui", {})
+    ui_fields = ui.setdefault("fields", {})
+    sections = ui.setdefault("sections", {})
+    order = ui.setdefault("order", [])
+    ui.setdefault("headers", {})
     json_part.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
     json_part.setdefault("type", "object")
-    json_part.setdefault("unevaluatedProperties", False)
+    # unevaluatedProperties is the reserve's validation policy: not touched.
     target = _section_for_added_fields(json_part, sections, order)
     if target is None:
         if ADDED_SECTION_ID in sections:
@@ -468,10 +501,15 @@ def merge_event_type_schema(
         else:
             target = SECTION_ID if not order else ADDED_SECTION_ID
             label = spec.display if not order else ADDED_SECTION_LABEL
-            sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
+            if target not in sections:
+                sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
         if target not in order:
             order.append(target)
+    if not isinstance(sections[target], dict):
+        raise SiteSchemaUnreadable(f"{spec.value}: section {target!r} of the site's form could not be read")
     column = sections[target].setdefault("leftColumn", [])
+    if not isinstance(column, list):
+        column = sections[target]["leftColumn"] = []
     for field in added:
         json_prop, ui_field = _property_pair(field, field.key)
         ui_field["parent"] = target

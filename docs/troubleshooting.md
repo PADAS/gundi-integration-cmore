@@ -60,8 +60,8 @@ EarthRanger event types* keep the reserve's options and never switch one off,
 so rangers can still pick it.
 
 1. Run *Create EarthRanger event types* with **Preview** on and look at
-   `stale_options` in the result. It lists each active option CMORE no longer
-   offers, by field.
+   `stale_options` in the result. It lists, by field, each active option
+   CMORE does not offer: removed in CMORE, or added on the site.
 2. For each one, either switch the option off in EarthRanger, or add a value
    mapping from it to the CMORE option that replaced it.
 

@@ -33,6 +33,7 @@ from app.datasource.er_event_types import (
     ExistingType,
     SiteSchemaUnreadable,
     merge_event_type_schema,
+    site_field_keys,
     plan_choice_additions,
 )
 from app.datasource.schemas import (
@@ -1302,22 +1303,17 @@ def _hand_mapped_event_types(integration: Integration, index: TagIndexData, grou
 
 
 def _schema_dict(schema) -> dict:
-    """An event type's schema as a dict with ``json.properties`` a dict.
-    EarthRanger's v2 listing returns it as a JSON string; anything
-    unparseable, at any level, reads as empty, so the type is treated as
-    having no generated fields rather than failing the run."""
+    """An event type's schema as a dict. EarthRanger's v2 listing returns it
+    as a JSON string; anything unparseable reads as empty, so the type is
+    treated as having no generated fields rather than failing the run. The
+    parts inside are left as they came: ``merge_event_type_schema`` refuses
+    what it cannot read, and the type is then skipped and reported."""
     if isinstance(schema, str):
         try:
             schema = json.loads(schema)
         except ValueError:
-            schema = {}
-    if not isinstance(schema, dict):
-        schema = {}
-    if not isinstance(schema.get("json"), dict):
-        schema["json"] = {}
-    if not isinstance(schema["json"].get("properties"), dict):
-        schema["json"]["properties"] = {}
-    return schema
+            return {}
+    return schema if isinstance(schema, dict) else {}
 
 
 def _existing_generated_types(existing: List[dict], group: int, specs: List[EventTypeSpec]) -> Dict[int, ExistingType]:
@@ -1332,12 +1328,7 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
             value = str(et.get("value") or "")
             if value == bare or value.startswith(prefix):
                 schema = _schema_dict(et.get("schema"))
-                keys = {}
-                for key in schema["json"]["properties"]:
-                    field_id = parse_generated_field_key(key)
-                    if field_id is not None and field_id not in keys:
-                        keys[field_id] = key
-                found[spec.cmore_tag_id] = ExistingType(value=value, keys=keys, schema=schema)
+                found[spec.cmore_tag_id] = ExistingType(value=value, keys=site_field_keys(schema), schema=schema)
                 break
     return found
 
@@ -1374,10 +1365,16 @@ async def _apply_choices(
     return stale_by_field
 
 
-# Per generated event type, the CMORE field ids it was built with, so a re-run
-# can tell a field the reserve deleted (known, missing: stays deleted) from a
-# field new in CMORE (unknown: added).
-FIELD_RECORD_ACTION_ID = "create_er_event_types"
+# The action's id, used for its activity-log entries and as the action_id of
+# its state records: per generated event type, the CMORE field ids it was
+# built with, so a re-run can tell a field the reserve deleted (known,
+# missing: stays deleted) from a field new in CMORE (unknown: added).
+CREATE_ER_EVENT_TYPES_ACTION_ID = "create_er_event_types"
+
+def _field_record_key(site_root: str, type_value: str) -> str:
+    """The record is about one type on one site: reconnecting the
+    destination to another site must not read this site's record."""
+    return f"{site_root}|{type_value}"
 
 
 @action_title("Create EarthRanger event types")
@@ -1428,9 +1425,22 @@ async def action_create_er_event_types(
                     # (titles, hidden fields, sections, their own fields, the
                     # name) and add only the CMORE fields it has never had.
                     record = await state_manager.get_state(
-                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
+                        integration_id=str(integration.id), action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
+                        source_id=_field_record_key(provider.site_root, type_value),
                     )
-                    known = set(record.get("field_ids") or []) or set(existing_keys)
+                    known = set(record.get("field_ids") or [])
+                    if not known:
+                        # A type from before records existed, or state that
+                        # was lost: the site's fields are all we know, so a
+                        # field the reserve deleted comes back once.
+                        known = set(existing_keys)
+                        await log_action_activity(
+                            integration_id=str(integration.id),
+                            action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
+                            title=f"{type_value} has no record of its generated fields; trusting the site's",
+                            level=LogLevel.WARNING,
+                            data={"event_type": type_value, "known_field_ids": sorted(known)},
+                        )
                     try:
                         merge = merge_event_type_schema(spec, prior.schema, existing_keys, known)
                     except SiteSchemaUnreadable:
@@ -1442,8 +1452,8 @@ async def action_create_er_event_types(
                     # the update would replace the reserve's whole form.
                     await log_action_activity(
                         integration_id=str(integration.id),
-                        action_id="create_er_event_types",
-                        title=f"Skipped {type_value}: EarthRanger returned no readable form for it",
+                        action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
+                        title=f"Skipped {type_value}: its form in EarthRanger could not be merged onto",
                         level=LogLevel.WARNING,
                         data={"event_type": type_value},
                     )
@@ -1473,7 +1483,7 @@ async def action_create_er_event_types(
                         if hand_mapped.get(spec.cmore_tag_id):
                             await log_action_activity(
                                 integration_id=str(integration.id),
-                                action_id="create_er_event_types",
+                                action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
                                 title=(
                                     f"{spec.display} is already mapped from "
                                     f"{', '.join(hand_mapped[spec.cmore_tag_id])}; rangers will see both types"
@@ -1481,23 +1491,34 @@ async def action_create_er_event_types(
                                 level=LogLevel.WARNING,
                                 data={"event_type": type_value, "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
                             )
-                records = build_choice_records(spec, existing_keys)
-                for f in removed_by_site:
-                    records.pop(existing_keys.get(f.cmore_field_id, f.key), None)
-                stale_options = await _apply_choices(er, records, dry_run, counts)
                 if not dry_run:
+                    # Recorded as soon as the fields exist, before the
+                    # choices: a choice failure must not leave new fields
+                    # unrecorded, or a retry would re-add one the reserve
+                    # had deleted meanwhile. Fields CMORE has dropped stay
+                    # on record for the same reason.
                     await state_manager.set_state(
-                        integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
-                        # Keep fields CMORE has dropped: one the reserve
-                        # deleted must stay deleted if CMORE restores it.
+                        integration_id=str(integration.id), action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
+                        source_id=_field_record_key(provider.site_root, type_value),
                         state={"field_ids": sorted(known | {f.cmore_field_id for f in spec.fields})},
                     )
+                records = build_choice_records(spec, existing_keys)
+                for f in removed_by_site:  # not on the site, so never under a site key
+                    records.pop(f.key, None)
+                # A generated field CMORE no longer has keeps its dropdown on
+                # the site; nothing it offers delivers, so audit it with no
+                # desired options and every active one shows as stale.
+                spec_ids = {f.cmore_field_id for f in spec.fields}
+                for field_id, key in existing_keys.items():
+                    if field_id not in spec_ids:
+                        records.setdefault(key, [])
+                stale_options = await _apply_choices(er, records, dry_run, counts)
             except Exception as exc:
                 # Every step is idempotent, so a re-run finishes the rest; the
                 # operator still needs to see how far this run got.
                 await log_action_activity(
                     integration_id=str(integration.id),
-                    action_id="create_er_event_types",
+                    action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
                     title=f"Creating EarthRanger event types stopped at {spec.display}",
                     level=LogLevel.ERROR,
                     data={
@@ -1538,7 +1559,7 @@ async def action_create_er_event_types(
     }
     await log_action_activity(
         integration_id=str(integration.id),
-        action_id="create_er_event_types",
+        action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
         title=("Previewed" if dry_run else "Created") + " EarthRanger event types from CMORE tags",
         level=LogLevel.INFO,
         data={
@@ -1553,7 +1574,7 @@ async def action_create_er_event_types(
         if et["skipped"]:
             await log_action_activity(
                 integration_id=str(integration.id),
-                action_id="create_er_event_types",
+                action_id=CREATE_ER_EVENT_TYPES_ACTION_ID,
                 title=f"Fields skipped on {et['display']}",
                 level=LogLevel.WARNING,
                 data={"event_type": et["value"], "skipped": et["skipped"], "shallow_fields": et["shallow_fields"]},

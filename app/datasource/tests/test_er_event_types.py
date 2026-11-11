@@ -252,12 +252,15 @@ def _site_schema():
                 "f261_evidence_type": {"type": "array", "title": "Evidence", "deprecated": False,
                                        "uniqueItems": True, "items": {"type": "string", "anyOf": [{"$ref": "/api/v2.0/schemas/choices.json?field=f261_evidence_type"}]}},
                 "f263_evidence_bag_no": {"type": "string", "title": "Evidence Bag No", "deprecated": True},
-                "f264_number_of_snares_found": {"type": "number", "title": "Snares", "deprecated": False},
-                "ranger_notes": {"type": "string", "title": "Ranger notes", "deprecated": False},
             },
-            "required": ["ranger_notes"],
+            "required": [],
+            # A conditional section's fields live in its then-subschema, not
+            # at the root: that is how EarthRanger's form builder writes them.
             "allOf": [{"if": {"properties": {"f261_evidence_type": {"contains": {"const": "snare"}}}},
-                       "then": {"properties": {}, "required": []}, "x-section": "section-2"}],
+                       "then": {"properties": {
+                           "f264_number_of_snares_found": {"type": "number", "title": "Snares", "deprecated": False},
+                           "ranger_notes": {"type": "string", "title": "Ranger notes", "deprecated": False},
+                       }, "required": ["ranger_notes"]}, "x-section": "section-2"}],
         },
         "ui": {
             "fields": {
@@ -295,9 +298,11 @@ def test_merge_keeps_every_site_edit_and_adds_only_new_cmore_fields():
     assert [f.cmore_field_id for f in added] == [265]
     assert [f.cmore_field_id for f in removed_by_site] == [262]
     before = _site_schema()
-    for key in ("f261_evidence_type", "f263_evidence_bag_no", "f264_number_of_snares_found", "ranger_notes"):
+    for key in ("f261_evidence_type", "f263_evidence_bag_no"):
         assert merged["json"]["properties"][key] == before["json"]["properties"][key]
+    for key in ("f261_evidence_type", "f263_evidence_bag_no", "f264_number_of_snares_found", "ranger_notes"):
         assert merged["ui"]["fields"][key] == before["ui"]["fields"][key]
+    assert "f264_number_of_snares_found" not in merged["json"]["properties"]  # stays in its conditional section
     assert merged["json"]["allOf"] == before["json"]["allOf"]
     assert merged["ui"]["order"] == before["ui"]["order"]
     assert "f262_cas_number" not in merged["json"]["properties"]
@@ -307,7 +312,8 @@ def test_merge_keeps_every_site_edit_and_adds_only_new_cmore_fields():
     assert merged["ui"]["fields"]["f265_sap_13"]["parent"] == "section-1"
     assert merged["ui"]["sections"]["section-1"]["leftColumn"][-1] == {"name": "f265_sap_13", "type": "field"}
     assert merged["ui"]["sections"]["section-2"] == before["ui"]["sections"]["section-2"]
-    assert merged["json"]["required"] == ["ranger_notes"]
+    assert merged["json"]["required"] == []
+
     assert site == before  # the input is not modified
 
 
@@ -367,7 +373,7 @@ def test_merge_never_makes_an_added_field_required():
     result = merge_event_type_schema(spec, _site_schema(), keys, {261, 262, 263, 264})
 
     assert [f.cmore_field_id for f in result.added] == [265]
-    assert result.schema["json"]["required"] == ["ranger_notes"]
+    assert result.schema["json"]["required"] == []
 
 
 def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
@@ -381,14 +387,102 @@ def test_merge_with_nothing_new_returns_the_site_schema_unchanged():
     assert sorted(f.cmore_field_id for f in result.removed_by_site) == [262, 265]
 
 
-@pytest.mark.parametrize("site", [None, {}, {"json": "{}"}, {"json": {"properties": {}}, "ui": {}}])
-def test_merge_refuses_a_site_schema_with_no_fields(site):
+@pytest.mark.parametrize("site", [
+    None, {}, {"json": "{}"}, {"json": {"properties": "x"}},
+    {"json": {"properties": {}}, "ui": {}},  # nothing on the site and nothing known: a rebuild, not a merge
+    {"json": {"properties": {"f261_evidence_type": {}}}, "ui": None},
+    {"json": {"properties": {"f261_evidence_type": {}}}, "ui": {"sections": None}},
+])
+def test_merge_refuses_a_site_schema_it_cannot_read(site):
     """Merging onto an empty form would rebuild it from CMORE and replace
     the reserve's; the caller must skip the type instead."""
     from app.datasource.er_event_types import SiteSchemaUnreadable, build_event_type_spec, merge_event_type_schema
 
     with pytest.raises(SiteSchemaUnreadable):
         merge_event_type_schema(build_event_type_spec(_tag(20), 7932), site, {}, set())
+
+
+def test_merge_onto_a_form_the_reserve_emptied_adds_only_the_new_field():
+    """The reserve deleted every generated field; the record still knows
+    them, so a field new in CMORE is added and the rest stay deleted."""
+    from app.datasource.er_event_types import SECTION_ID, build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = {"json": {"properties": {}}, "ui": {"order": [SECTION_ID], "sections": {SECTION_ID: {"label": "Evidence", "leftColumn": []}}}}
+    result = merge_event_type_schema(spec, site, {}, {261, 262, 263, 264})
+    assert [f.cmore_field_id for f in result.added] == [265]
+    assert sorted(f.cmore_field_id for f in result.removed_by_site) == [261, 262, 263, 264]
+    assert result.schema["ui"]["sections"][SECTION_ID]["leftColumn"] == [{"name": "f265_sap_13", "type": "field"}]
+
+
+def test_site_field_keys_include_fields_in_conditional_sections():
+    from app.datasource.er_event_types import site_field_keys
+
+    assert site_field_keys(_site_schema()) == {
+        261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found",
+    }
+    assert site_field_keys({"json": {"properties": {}, "allOf": [{"then": {"properties": {"f9_x": {}}}}, "bad"]}}) == {9: "f9_x"}
+    assert site_field_keys({"json": "x"}) == {}
+
+
+def test_merge_leaves_a_generated_field_the_reserve_moved_into_a_conditional_section_alone():
+    """Such a field is not at the root. It is on the site all the same: not
+    added again, not reported as removed."""
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema, site_field_keys
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    result = merge_event_type_schema(spec, site, site_field_keys(site), {261, 262, 263, 264, 265})
+    assert result.added == []
+    assert [f.cmore_field_id for f in result.removed_by_site] == [262, 265]
+
+
+def test_merge_does_not_add_a_validation_policy_the_reserve_removed():
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema, site_field_keys
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    del site["json"]["unevaluatedProperties"]
+    merged = merge_event_type_schema(spec, site, site_field_keys(site), {261, 262, 263, 264}).schema
+    assert [f.key for f in spec.fields if f.key in merged["json"]["properties"]] == ["f261_evidence_type", "f263_evidence_bag_no", "f265_sap_13"]
+    assert "unevaluatedProperties" not in merged["json"]
+
+
+def test_merge_onto_a_form_whose_fields_are_all_conditional():
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema, site_field_keys
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    for key in ("f261_evidence_type", "f263_evidence_bag_no"):
+        site["json"]["allOf"][0]["then"]["properties"][key] = site["json"]["properties"].pop(key)
+    result = merge_event_type_schema(spec, site, site_field_keys(site), set())
+    assert [f.cmore_field_id for f in result.added] == [262, 265]
+    assert result.schema["ui"]["fields"]["f262_cas_number"]["parent"] == "section-1"
+
+
+def test_merge_keeps_an_existing_section_when_the_order_is_empty():
+    """A form whose ui.order is empty still holds the reserve's sections;
+    the merge must not replace one with a fresh section of the same id."""
+    from app.datasource.er_event_types import SECTION_ID, build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    site["ui"]["order"] = []
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+    merged = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264}).schema
+    section = merged["ui"]["sections"][SECTION_ID]
+    assert section["label"] == "Evidence"
+    assert [c["name"] for c in section["leftColumn"]] == ["f261_evidence_type", "f263_evidence_bag_no", "f265_sap_13"]
+    assert merged["ui"]["order"] == [SECTION_ID]
+
+
+def test_merge_with_nothing_new_hands_back_the_site_schema_itself():
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+    assert merge_event_type_schema(spec, site, keys, {261, 262, 263, 264, 265}).schema is site
 
 
 def test_plan_choice_additions_only_adds_and_reports_stale():
@@ -398,7 +492,8 @@ def test_plan_choice_additions_only_adds_and_reports_stale():
                {"model": "activity.event", "field": "f", "value": "b", "display": "B", "is_active": True, "ordernum": 2}]
     existing = [{"id": "1", "value": "a", "display": "A, shortened by the reserve", "is_active": True, "ordernum": 9},
                 {"id": "3", "value": "c", "display": "C", "is_active": True, "ordernum": 3},
-                {"id": "4", "value": "d", "display": "D", "is_active": False, "ordernum": 4}]
+                {"id": "4", "value": "d", "display": "D", "is_active": False, "ordernum": 4},
+                {"id": "5", "display": "no value", "is_active": True, "ordernum": 5}]
     plan = plan_choice_additions(existing, desired)
     creates, stale = plan.creates, plan.stale
     assert creates == [desired[1]]
