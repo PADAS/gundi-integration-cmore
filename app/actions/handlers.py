@@ -1325,13 +1325,14 @@ def _existing_generated_types(existing: List[dict], group: int, specs: List[Even
         for et in existing or []:
             value = str(et.get("value") or "")
             if value == bare or value.startswith(prefix):
-                properties = (_schema_dict(et.get("schema")).get("json") or {}).get("properties") or {}
+                schema = _schema_dict(et.get("schema"))
+                properties = (schema.get("json") or {}).get("properties") or {}
                 keys = {}
                 for key in properties:
                     field_id = parse_generated_field_key(key)
                     if field_id is not None and field_id not in keys:
                         keys[field_id] = key
-                found[spec.cmore_tag_id] = {"value": value, "keys": keys, "schema": _schema_dict(et.get("schema"))}
+                found[spec.cmore_tag_id] = {"value": value, "keys": keys, "schema": schema}
                 break
     return found
 
@@ -1417,6 +1418,25 @@ async def action_create_er_event_types(
             existing_keys = prior["keys"] if prior else {}
             type_value = prior["value"] if prior else spec.value
             try:
+                if prior and not ((prior["schema"].get("json") or {}).get("properties")):
+                    # No readable schema: every CMORE field would look new and
+                    # the update would replace the reserve's whole form.
+                    await log_action_activity(
+                        integration_id=str(integration.id),
+                        action_id="create_er_event_types",
+                        title=f"Skipped {type_value}: EarthRanger returned no readable form for it",
+                        level=LogLevel.WARNING,
+                        data={"event_type": type_value},
+                    )
+                    reported.append({
+                        "value": type_value, "display": spec.display, "action": "skipped_schema_unreadable",
+                        "fields": len(spec.fields), "added_fields": [], "removed_by_site": [], "stale_options": {},
+                        "skipped": [f.dict() for f in spec.skipped],
+                        "shallow_fields": [f.dict() for f in spec.shallow_fields],
+                        "mapped_by_hand": hand_mapped.get(spec.cmore_tag_id, []),
+                    })
+                    continue
+                known: set = set()
                 if prior:
                     # Re-run: the site's type is the reserve's. Keep every edit
                     # (titles, hidden fields, sections, their own fields, the
@@ -1450,7 +1470,6 @@ async def action_create_er_event_types(
                                 level=LogLevel.WARNING,
                                 data={"event_type": type_value, "mapped_by_hand": hand_mapped[spec.cmore_tag_id]},
                             )
-                removed_ids = {f.cmore_field_id for f in removed_by_site}
                 records = build_choice_records(spec, existing_keys)
                 for f in removed_by_site:
                     records.pop(existing_keys.get(f.cmore_field_id, f.key), None)
@@ -1458,7 +1477,9 @@ async def action_create_er_event_types(
                 if not dry_run:
                     await state_manager.set_state(
                         integration_id=str(integration.id), action_id=FIELD_RECORD_ACTION_ID, source_id=type_value,
-                        state={"field_ids": sorted(f.cmore_field_id for f in spec.fields)},
+                        # Keep fields CMORE has dropped: one the reserve
+                        # deleted must stay deleted if CMORE restores it.
+                        state={"field_ids": sorted(known | {f.cmore_field_id for f in spec.fields})},
                     )
             except Exception as exc:
                 # Every step is idempotent, so a re-run finishes the rest; the
@@ -1490,7 +1511,7 @@ async def action_create_er_event_types(
                 "action": action,
                 "fields": len(spec.fields),
                 "added_fields": [f.label for f in added],
-                "removed_by_site": [f.label for f in removed_by_site if f.cmore_field_id in removed_ids],
+                "removed_by_site": [f.label for f in removed_by_site],
                 "stale_options": stale_options,
                 "skipped": [f.dict() for f in spec.skipped],
                 "shallow_fields": [f.dict() for f in spec.shallow_fields],

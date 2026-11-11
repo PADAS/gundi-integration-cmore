@@ -222,15 +222,10 @@ def test_required_fields_land_in_required():
     assert build_event_type_payload(build_event_type_spec(raw, 1))["schema"]["json"]["required"] == ["f9_x"]
 
 
-def test_existing_value_and_keys_are_kept_on_rerun():
-    from app.datasource.er_event_types import build_choice_records, build_event_type_payload, build_event_type_spec
+def test_choice_records_use_the_existing_field_key_on_rerun():
+    from app.datasource.er_event_types import build_choice_records, build_event_type_spec
 
     spec = build_event_type_spec(_tag(20), 7932)
-    p = build_event_type_payload(spec, existing_value="cmore_7932_20_old_name", existing_keys={261: "f261_old_key"})
-    assert p["value"] == "cmore_7932_20_old_name"
-    props = p["schema"]["json"]["properties"]
-    assert "f261_old_key" in props and "f261_evidence_type" not in props
-    assert props["f261_old_key"]["items"]["anyOf"][0]["$ref"].endswith("field=f261_old_key")
     assert build_choice_records(spec, existing_keys={261: "f261_old_key"}).keys() == {"f261_old_key"}
 
 
@@ -306,11 +301,51 @@ def test_merge_keeps_every_site_edit_and_adds_only_new_cmore_fields():
     assert merged["ui"]["order"] == before["ui"]["order"]
     assert "f262_cas_number" not in merged["json"]["properties"]
     assert merged["json"]["properties"]["f265_sap_13"] == {"type": "string", "title": "SAP 13", "deprecated": False}
-    assert merged["ui"]["fields"]["f265_sap_13"]["parent"] == "section-2"  # appended to the last section
-    assert merged["ui"]["sections"]["section-2"]["leftColumn"][-1] == {"name": "f265_sap_13", "type": "field"}
-    assert merged["ui"]["sections"]["section-1"] == before["ui"]["sections"]["section-1"]
+    # section-2 only shows for some answers, so the new field goes to the
+    # last section that always shows.
+    assert merged["ui"]["fields"]["f265_sap_13"]["parent"] == "section-1"
+    assert merged["ui"]["sections"]["section-1"]["leftColumn"][-1] == {"name": "f265_sap_13", "type": "field"}
+    assert merged["ui"]["sections"]["section-2"] == before["ui"]["sections"]["section-2"]
     assert merged["json"]["required"] == ["ranger_notes"]
     assert site == before  # the input is not modified
+
+
+def test_merge_adds_its_own_section_when_no_section_always_shows():
+    from app.datasource.er_event_types import ADDED_SECTION_ID, build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    site = _site_schema()
+    site["ui"]["sections"]["section-1"]["isActive"] = False  # switched off; section-2 is conditional
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+
+    merged, added, _ = merge_event_type_schema(spec, site, keys, {261, 262, 263, 264})
+
+    assert merged["ui"]["order"] == ["section-1", "section-2", ADDED_SECTION_ID]
+    section = merged["ui"]["sections"][ADDED_SECTION_ID]
+    assert section["isActive"] is True and section["label"] == "New from CMORE"
+    assert section["leftColumn"] == [{"name": "f265_sap_13", "type": "field"}]
+    assert merged["ui"]["fields"]["f265_sap_13"]["parent"] == ADDED_SECTION_ID
+
+    # A later run reuses that section rather than adding another.
+    # (262 is treated as new this time.)
+    again, _, _ = merge_event_type_schema(spec, merged, {**keys, 265: "f265_sap_13"}, {261, 263, 264, 265})
+    assert again["ui"]["order"].count(ADDED_SECTION_ID) == 1
+    assert [c["name"] for c in again["ui"]["sections"][ADDED_SECTION_ID]["leftColumn"]] == ["f265_sap_13", "f262_cas_number"]
+
+
+def test_merge_never_makes_an_added_field_required():
+    """A required field the reserve hides or puts behind a condition would
+    block every report; the reserve decides what is required."""
+    from app.datasource.er_event_types import build_event_type_spec, merge_event_type_schema
+
+    spec = build_event_type_spec(_tag(20), 7932)
+    spec.fields = [f.copy(update={"required": True}) if f.cmore_field_id == 265 else f for f in spec.fields]
+    keys = {261: "f261_evidence_type", 263: "f263_evidence_bag_no", 264: "f264_number_of_snares_found"}
+
+    merged, added, _ = merge_event_type_schema(spec, _site_schema(), keys, {261, 262, 263, 264})
+
+    assert [f.cmore_field_id for f in added] == [265]
+    assert merged["json"]["required"] == ["ranger_notes"]
 
 
 def test_merge_with_nothing_new_returns_the_site_schema_unchanged():

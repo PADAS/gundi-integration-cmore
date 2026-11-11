@@ -523,6 +523,44 @@ async def test_the_record_of_generated_fields_is_written_after_a_run_not_a_previ
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("schema", [None, "not json", {}, {"json": {"properties": {}}, "ui": {}}])
+async def test_rerun_skips_a_type_whose_schema_cannot_be_read(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state, schema):
+    """With no readable schema every CMORE field would look new, and the
+    update would replace the reserve's whole form. Skip the type instead."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"] = schema
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    mock_er_admin.post_event_type.assert_not_awaited()
+    mock_er_admin.post_choice.assert_not_awaited()
+    mock_state.set_state.assert_not_awaited()
+    et = result["event_types"][0]
+    assert et["value"] == "cmore_7932_20_evidence_of_poacher"
+    assert et["action"] == "skipped_schema_unreadable"
+    assert et["added_fields"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_record_keeps_fields_cmore_has_since_dropped(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """A field the reserve deleted stays known even while CMORE drops it, so
+    it does not come back if CMORE restores it later."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_edited_type()]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265, 999]}
+
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    assert mock_state.set_state.await_args.kwargs["state"] == {"field_ids": [261, 262, 263, 264, 265, 999]}
+
+
+@pytest.mark.asyncio
 async def test_second_run_reads_the_schema_earthranger_returns_as_a_json_string(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
     """EarthRanger's v2 listing returns `schema` as a JSON string, not an
     object (seen on dev 2026-10-23: the re-run failed with AttributeError

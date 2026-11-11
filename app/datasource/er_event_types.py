@@ -235,6 +235,10 @@ def build_event_type_spec(raw_tag: dict, group: int) -> EventTypeSpec:
 # ----- v2 schema payload -----
 
 SECTION_ID = "section-1"
+# Where a re-run puts new CMORE fields when no section of the reserve's form
+# always shows (each is switched off or behind a condition).
+ADDED_SECTION_ID = "section-cmore"
+ADDED_SECTION_LABEL = "New from CMORE"
 CHOICE_MODEL = "activity.event"
 _CHOICES_REF = "/api/v2.0/schemas/choices.json?field={field}"
 
@@ -284,27 +288,21 @@ def _property_pair(field: FieldSpec, key: str) -> tuple:
     return json_prop, ui_field
 
 
-def build_event_type_payload(
-    spec: EventTypeSpec,
-    *,
-    existing_value: Optional[str] = None,
-    existing_keys: Dict[int, str] = {},
-) -> dict:
-    """POST/PATCH body for the EarthRanger v2 event-type endpoint. On a
-    re-run ``existing_value`` and ``existing_keys`` keep what the site already
-    has, so only display, schema and is_active change."""
+def build_event_type_payload(spec: EventTypeSpec) -> dict:
+    """POST body that creates the type on the EarthRanger v2 event-type
+    endpoint. A re-run never sends this; it merges onto the site's schema
+    with ``merge_event_type_schema``."""
     properties: Dict[str, dict] = {}
     ui_fields: Dict[str, dict] = {}
     left = []
     required = []
     for field in spec.fields:
-        key = _effective_key(field, existing_keys)
-        json_prop, ui_field = _property_pair(field, key)
-        properties[key] = json_prop
-        ui_fields[key] = ui_field
-        left.append({"name": key, "type": "field"})
+        json_prop, ui_field = _property_pair(field, field.key)
+        properties[field.key] = json_prop
+        ui_fields[field.key] = ui_field
+        left.append({"name": field.key, "type": "field"})
         if field.required:
-            required.append(key)
+            required.append(field.key)
     schema = {
         "json": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -329,7 +327,7 @@ def build_event_type_payload(
         },
     }
     return {
-        "value": existing_value or spec.value,
+        "value": spec.value,
         "display": spec.display,
         "category": spec.category_value,
         "is_active": True,
@@ -390,9 +388,13 @@ def merge_event_type_schema(
     fields, and fields of their own. A CMORE field is added only when it is
     not on the site and not in ``known_field_ids`` (the fields this type was
     generated with before); a known field missing from the site was removed
-    by the reserve and stays removed. New fields go at the end of the last
-    section. Returns ``(schema, added, removed_by_site)``; the input is not
-    modified."""
+    by the reserve and stays removed.
+
+    New fields go at the end of the last section that always shows (active,
+    with no condition), else in a section of their own. They are never made
+    required: on a form the reserve has shaped, a required field that is
+    hidden or behind a condition would block every report. Returns
+    ``(schema, added, removed_by_site)``; the input is not modified."""
     schema = copy.deepcopy(site_schema or {})
     json_part = schema.setdefault("json", {})
     properties = json_part.setdefault("properties", {})
@@ -416,20 +418,28 @@ def merge_event_type_schema(
     json_part.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
     json_part.setdefault("type", "object")
     json_part.setdefault("unevaluatedProperties", False)
-    required = json_part.setdefault("required", [])
-    if not order:
-        order.append(SECTION_ID)
-    target = order[-1]
-    section = sections.setdefault(target, {
-        "label": spec.display, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": [],
-    })
-    column = section.setdefault("leftColumn", [])
+    target = _section_for_added_fields(json_part, sections, order)
+    if target is None:
+        target = SECTION_ID if not order else ADDED_SECTION_ID
+        label = spec.display if not order else ADDED_SECTION_LABEL
+        order.append(target)
+        sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
+    column = sections[target].setdefault("leftColumn", [])
     for field in added:
         json_prop, ui_field = _property_pair(field, field.key)
         ui_field["parent"] = target
         properties[field.key] = json_prop
         ui_fields[field.key] = ui_field
         column.append({"name": field.key, "type": "field"})
-        if field.required and field.key not in required:
-            required.append(field.key)
     return schema, added, removed_by_site
+
+
+def _section_for_added_fields(json_part: dict, sections: dict, order: List[str]) -> Optional[str]:
+    """The last section in ``order`` that always shows: active, and not the
+    target of a condition (an ``allOf`` entry's ``x-section``)."""
+    conditional = {c.get("x-section") for c in json_part.get("allOf") or [] if isinstance(c, dict)}
+    for section_id in reversed(order):
+        section = sections.get(section_id)
+        if isinstance(section, dict) and section.get("isActive", True) and section_id not in conditional:
+            return section_id
+    return None

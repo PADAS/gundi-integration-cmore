@@ -24,6 +24,10 @@ full rules are in
 [Configuration → Re-runs keep the reserve's edits](configuration.md#re-runs-keep-the-reserves-edits).
 ([#49](https://github.com/PADAS/gundi-integration-cmore/pull/49))
 
+New fields go at the end of a section that always shows, or in a "New from
+CMORE" section, and are never made required. A type whose form EarthRanger
+can't return is skipped and reported, not replaced.
+
 Three side effects to know about:
 
 - **Options CMORE removes stay selectable in EarthRanger.** A re-run used to

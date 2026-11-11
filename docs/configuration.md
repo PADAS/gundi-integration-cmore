@@ -319,12 +319,20 @@ what is new in CMORE and changes nothing already on the site:
   their conditions; required fields; fields the reserve added for EarthRanger
   only; and every dropdown option's wording, order and active state.
 - **Added:** a CMORE property the type has never had becomes a new field at
-  the end of the last section, and a new CMORE option is added to its list.
+  the end of the last section that always shows (switched on, with no
+  condition). If no section always shows, it goes in a section called "New
+  from CMORE". An added field is never made required, even if CMORE requires
+  it; make it required yourself if you want. A new CMORE option is added to
+  its list.
+- **Skipped:** if EarthRanger returns no readable form for a type, the run
+  leaves that type alone, reports it as `skipped_schema_unreadable` and logs a
+  warning, rather than replace the form.
 - **Not brought back:** a generated field the reserve deleted stays deleted.
   Gundi records which CMORE fields each type was built with, so a missing
   field it built before is treated as removed on purpose. Types created
   before this record existed (before November 2026) have none yet, so their
-  first re-run restores a deleted field once.
+  first re-run restores a deleted field once. The record keeps fields CMORE
+  has since dropped, so a deleted field stays deleted if CMORE restores it.
 - **Reported, not changed:** an active option CMORE no longer offers stays
   on the site and is listed under `stale_options` in the result. Rangers
   can still pick it, but CMORE no longer knows it, so the field arrives in
