@@ -307,9 +307,52 @@ EarthRanger.
 can serve several CMORE share groups: each CMORE integration delivers only
 the types that carry *its* group and skips the others as unmapped. The slug
 is cosmetic; on a re-run existing objects are matched by the id prefix, so a
-CMORE rename updates the display name but never creates a second type or
-field. Nothing in EarthRanger is ever deleted: deselected tags are left
-alone and dropped options are deactivated.
+CMORE rename never creates a second type or field.
+
+### Re-runs keep the reserve's edits
+
+Once a generated type exists, it belongs to the reserve. A re-run only adds
+what is new in CMORE and changes nothing already on the site:
+
+- **Kept as the site has it:** the type's name, category and active state;
+  every field's title, hidden (deprecated) state and position, including a
+  generated field moved into a conditional section; sections and their
+  conditions; required fields; the form's validation settings; fields the reserve added for EarthRanger
+  only; and every dropdown option's wording, order and active state.
+- **Added:** a CMORE property the type has never had becomes a new field at
+  the end of the last section that always shows (switched on, with no
+  condition). If no section always shows, it goes in a section called "New
+  from CMORE". An added field is never made required, even if CMORE requires
+  it; make it required yourself if you want. A new CMORE option is added to
+  its list.
+- **Skipped:** if a type's form in EarthRanger cannot be read, or has no
+  fields and Gundi has no record of it, the run leaves that type alone,
+  reports it as `skipped_schema_unreadable` and logs a warning, rather than
+  replace the form.
+- **Not brought back:** a generated field the reserve deleted stays deleted.
+  Gundi records which CMORE fields each type was built with, so a missing
+  field it built before is treated as removed on purpose. Types created
+  before this record existed (before November 2026) have none yet, so their
+  first re-run restores a deleted field once. The record keeps fields CMORE
+  has since dropped, so a deleted field stays deleted if CMORE restores it.
+- **Reported, not changed:** an active option CMORE does not offer, whether
+  CMORE removed it or the reserve added it, stays on the site and is listed
+  under `stale_options` in the result; so is every active option of a
+  generated dropdown whose CMORE property no longer exists. Rangers can
+  still pick it, but CMORE does not know it, so the field arrives in CMORE
+  empty, with only a warning in the runner log. **Check
+  `stale_options` after every run** and switch each listed option off in
+  EarthRanger, or map it to its replacement (see
+  [Troubleshooting](troubleshooting.md#a-dropdown-value-arrives-in-cmore-empty)).
+  Nothing in EarthRanger is ever deleted or deactivated, and deselected tags
+  are left alone.
+- **Not renamed:** a tag or property renamed in CMORE keeps its old name on
+  the site. Delivery matches on ids, so it is unaffected.
+
+What the reserve must not change is a field's key (`f<fieldid>_…`) or an
+option's stored value: delivery matches on those, not on titles. The result
+of each run lists `added_fields`, `removed_by_site` and `stale_options` per
+type, and Preview only shows them before anything is written.
 
 ### Field translation
 

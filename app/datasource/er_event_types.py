@@ -18,8 +18,9 @@ earthranger-cli's ``schema_gen`` / ``choices`` modules (design:
 docs/superpowers/specs/2026-10-23-cmore-tags-to-er-event-types-design.md).
 """
 
+import copy
 import re
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Set
 
 import pydantic
 
@@ -234,6 +235,10 @@ def build_event_type_spec(raw_tag: dict, group: int) -> EventTypeSpec:
 # ----- v2 schema payload -----
 
 SECTION_ID = "section-1"
+# Where a re-run puts new CMORE fields when no section of the reserve's form
+# always shows (each is switched off or behind a condition).
+ADDED_SECTION_ID = "section-cmore"
+ADDED_SECTION_LABEL = "New from CMORE"
 CHOICE_MODEL = "activity.event"
 _CHOICES_REF = "/api/v2.0/schemas/choices.json?field={field}"
 
@@ -253,12 +258,6 @@ _SCALAR_UI: Dict[str, dict] = {
     "boolean": {"type": "BOOLEAN"},
     "datetime": {"type": "DATE_TIME"},
 }
-
-
-def _effective_key(field: FieldSpec, existing_keys: Dict[int, str]) -> str:
-    """The key an existing site already uses for this CMORE field, else the
-    generated one. Keys are never rewritten once created (Decision 6)."""
-    return existing_keys.get(field.cmore_field_id, field.key)
 
 
 def _property_pair(field: FieldSpec, key: str) -> tuple:
@@ -283,27 +282,21 @@ def _property_pair(field: FieldSpec, key: str) -> tuple:
     return json_prop, ui_field
 
 
-def build_event_type_payload(
-    spec: EventTypeSpec,
-    *,
-    existing_value: Optional[str] = None,
-    existing_keys: Dict[int, str] = {},
-) -> dict:
-    """POST/PATCH body for the EarthRanger v2 event-type endpoint. On a
-    re-run ``existing_value`` and ``existing_keys`` keep what the site already
-    has, so only display, schema and is_active change."""
+def build_event_type_payload(spec: EventTypeSpec) -> dict:
+    """POST body that creates the type on the EarthRanger v2 event-type
+    endpoint. A re-run never sends this; it merges onto the site's schema
+    with ``merge_event_type_schema``."""
     properties: Dict[str, dict] = {}
     ui_fields: Dict[str, dict] = {}
     left = []
     required = []
     for field in spec.fields:
-        key = _effective_key(field, existing_keys)
-        json_prop, ui_field = _property_pair(field, key)
-        properties[key] = json_prop
-        ui_fields[key] = ui_field
-        left.append({"name": key, "type": "field"})
+        json_prop, ui_field = _property_pair(field, field.key)
+        properties[field.key] = json_prop
+        ui_fields[field.key] = ui_field
+        left.append({"name": field.key, "type": "field"})
         if field.required:
-            required.append(key)
+            required.append(field.key)
     schema = {
         "json": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -328,7 +321,7 @@ def build_event_type_payload(
         },
     }
     return {
-        "value": existing_value or spec.value,
+        "value": spec.value,
         "display": spec.display,
         "category": spec.category_value,
         "is_active": True,
@@ -345,7 +338,9 @@ def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}
     for field in spec.fields:
         if field.type not in ("select", "multiselect"):
             continue
-        key = _effective_key(field, existing_keys)
+        # The key the site already uses for this CMORE field, else the
+        # generated one: keys are never rewritten once created (Decision 6).
+        key = existing_keys.get(field.cmore_field_id, field.key)
         records[key] = [
             {
                 "model": CHOICE_MODEL,
@@ -360,51 +355,178 @@ def build_choice_records(spec: EventTypeSpec, existing_keys: Dict[int, str] = {}
     return records
 
 
-class ChoiceOp(pydantic.BaseModel):
-    action: Literal["create", "update", "deactivate", "unchanged"]
-    value: str
-    payload: Optional[dict] = None  # POST/PATCH body; None for unchanged
-    choice_id: Optional[str] = None  # set for update / deactivate
+class ChoicePlan(pydantic.BaseModel):
+    """What a field's option list needs: ``creates`` are the choice payloads
+    the site is missing; ``stale`` are its active values CMORE no longer
+    offers (reported, never deactivated: they may be the reserve's own)."""
+    creates: List[dict]
+    stale: List[str]
 
 
-def _choice_sort_key(record: dict):
-    """Server display order: ordernum ascending, nulls last, then value."""
-    num = record.get("ordernum")
-    return (num is None, num if num is not None else 0, record.get("value") or "")
-
-
-def _differs(have: dict, want: dict, order_settled: bool) -> bool:
-    return (
-        have.get("display") != want["display"]
-        or not have.get("is_active", True)
-        or (not order_settled and have.get("ordernum") != want.get("ordernum"))
+def plan_choice_additions(existing: List[dict], desired: List[dict]) -> ChoicePlan:
+    existing_values = {c.get("value") for c in existing or []}
+    desired_values = {d["value"] for d in desired}
+    return ChoicePlan(
+        creates=[d for d in desired if d["value"] not in existing_values],
+        stale=[c["value"] for c in existing or []
+               if c.get("value") and c.get("is_active", True) and c["value"] not in desired_values],
     )
 
 
-def plan_field_choices(existing: List[dict], desired: List[dict]) -> List[ChoiceOp]:
-    """Diff one field's existing ``Choice`` records against the desired ones:
-    create missing, update changed display/order, deactivate extras. When
-    the visible (active, display-ordered) sequence already matches, the
-    server's numbering is left alone. From earthranger-cli's planner."""
-    ops: List[ChoiceOp] = []
-    existing_by_value = {c["value"]: c for c in existing}
-    desired_values = {d["value"] for d in desired}
-    active = [c for c in existing if c.get("is_active", True)]
-    order_settled = [c["value"] for c in sorted(active, key=_choice_sort_key)] == [
-        d["value"] for d in desired
-    ] and all(c.get("ordernum") is not None for c in active)
-    for want in desired:
-        have = existing_by_value.get(want["value"])
-        if have is None:
-            ops.append(ChoiceOp(action="create", value=want["value"], payload=want))
-        elif _differs(have, want, order_settled):
-            payload = {"display": want["display"], "is_active": True}
-            if not order_settled and have.get("ordernum") != want.get("ordernum"):
-                payload["ordernum"] = want.get("ordernum")
-            ops.append(ChoiceOp(action="update", value=want["value"], payload=payload, choice_id=str(have["id"])))
+# ----- re-run: merge onto the site's schema -----
+
+
+class ExistingType(pydantic.BaseModel):
+    """A generated event type already on the site: its value, the field key
+    the site holds for each CMORE field id, and its schema as a dict."""
+    value: str
+    keys: Dict[int, str]
+    schema_: dict = pydantic.Field(alias="schema")
+
+    class Config:
+        allow_population_by_field_name = True
+
+    @property
+    def schema(self) -> dict:  # ``schema`` is taken by BaseModel.schema()
+        return self.schema_
+
+
+def _site_property_maps(schema) -> List[dict]:
+    """Every ``properties`` object a site's form keeps fields in: the root,
+    and the ``then`` of each conditional section, which is where
+    EarthRanger's form builder moves a section's fields once it has a
+    condition. Parts that are not objects are left out."""
+    json_part = schema.get("json") if isinstance(schema, dict) else None
+    if not isinstance(json_part, dict):
+        return []
+    maps = [json_part.get("properties")]
+    for clause in json_part.get("allOf") or []:
+        then = clause.get("then") if isinstance(clause, dict) else None
+        if isinstance(then, dict):
+            maps.append(then.get("properties"))
+    return [m for m in maps if isinstance(m, dict)]
+
+
+def site_field_keys(schema) -> Dict[int, str]:
+    """Per CMORE field id, the key the site's form holds for it, wherever
+    the reserve has put the field."""
+    keys: Dict[int, str] = {}
+    for properties in _site_property_maps(schema):
+        for key in properties:
+            field_id = parse_generated_field_key(key)
+            if field_id is not None and field_id not in keys:
+                keys[field_id] = key
+    return keys
+
+
+class SiteSchemaUnreadable(ValueError):
+    """The site returned no form to merge onto; see ``merge_event_type_schema``."""
+
+
+class MergeResult(pydantic.BaseModel):
+    schema_: dict = pydantic.Field(alias="schema")
+    added: List[FieldSpec]
+    removed_by_site: List[FieldSpec]
+
+    class Config:
+        allow_population_by_field_name = True
+
+    @property
+    def schema(self) -> dict:  # ``schema`` is taken by BaseModel.schema()
+        return self.schema_
+
+
+def merge_event_type_schema(
+    spec: EventTypeSpec,
+    site_schema: Optional[dict],
+    existing_keys: Dict[int, str],
+    known_field_ids: Optional[Set[int]],
+) -> MergeResult:
+    """The site's schema with only CMORE fields it has never seen added.
+
+    Everything already on the site stays as the reserve left it: titles,
+    hidden (deprecated) fields, sections and their conditions, required
+    fields, and fields of their own. A CMORE field is added only when it is
+    not on the site (``existing_keys``, from ``site_field_keys``)
+    and not in ``known_field_ids`` (the fields this type was generated with
+    before; ``None`` when there is no record of it, which is not the same as
+    a record of no fields); a known field missing from the site was removed
+    by the reserve and stays removed.
+
+    New fields go at the end of the last section that always shows (active,
+    with no condition), else in a section of their own, which later runs
+    reuse as the reserve left it. They are never made required: on a form
+    the reserve has shaped, a required field that is hidden or behind a
+    condition would block every report.
+
+    Raises ``SiteSchemaUnreadable`` when the site's schema cannot be merged
+    onto: its ``json``, ``properties`` or ``ui`` parts are not objects, or it
+    has no fields and there is no record of it (a merge would then rebuild
+    the form from CMORE and replace the reserve's). The input is not
+    modified; with nothing to add it is returned as is."""
+    json_in = site_schema.get("json") if isinstance(site_schema, dict) else None
+    ui_in = site_schema.get("ui", {}) if isinstance(site_schema, dict) else None
+    properties_in = json_in.get("properties") if isinstance(json_in, dict) else None
+    if not isinstance(properties_in, dict) or not isinstance(ui_in, dict) \
+            or not all(isinstance(ui_in.get(part, {}), dict) for part in ("fields", "sections", "headers")) \
+            or not isinstance(ui_in.get("order", []), list):
+        raise SiteSchemaUnreadable(f"{spec.value}: the site's form could not be read")
+    if not any(_site_property_maps(site_schema)[1:] + [properties_in]) and known_field_ids is None:
+        raise SiteSchemaUnreadable(f"{spec.value}: the site's form has no fields and there is no record of it")
+    known = known_field_ids or set()
+    added: List[FieldSpec] = []
+    removed_by_site: List[FieldSpec] = []
+    for field in spec.fields:
+        if field.cmore_field_id in existing_keys:
+            continue
+        if field.cmore_field_id in known:
+            removed_by_site.append(field)
+            continue
+        added.append(field)
+    if not added:
+        return MergeResult(schema=site_schema, added=added, removed_by_site=removed_by_site)
+    schema = copy.deepcopy(site_schema)
+    json_part = schema["json"]
+    properties = json_part["properties"]
+    ui = schema.setdefault("ui", {})
+    ui_fields = ui.setdefault("fields", {})
+    sections = ui.setdefault("sections", {})
+    order = ui.setdefault("order", [])
+    ui.setdefault("headers", {})
+    json_part.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
+    json_part.setdefault("type", "object")
+    # unevaluatedProperties is the reserve's validation policy: not touched.
+    target = _section_for_added_fields(json_part, sections, order)
+    if target is None:
+        if ADDED_SECTION_ID in sections:
+            target = ADDED_SECTION_ID  # ours from an earlier run, however the reserve left it
         else:
-            ops.append(ChoiceOp(action="unchanged", value=want["value"]))
-    for have in existing:
-        if have["value"] not in desired_values and have.get("is_active", True):
-            ops.append(ChoiceOp(action="deactivate", value=have["value"], payload={"is_active": False}, choice_id=str(have["id"])))
-    return ops
+            target = SECTION_ID if not order else ADDED_SECTION_ID
+            label = spec.display if not order else ADDED_SECTION_LABEL
+            if target not in sections:
+                sections[target] = {"label": label, "columns": 1, "isActive": True, "leftColumn": [], "rightColumn": []}
+        if target not in order:
+            order.append(target)
+    if not isinstance(sections[target], dict):
+        raise SiteSchemaUnreadable(f"{spec.value}: section {target!r} of the site's form could not be read")
+    column = sections[target].setdefault("leftColumn", [])
+    if not isinstance(column, list):
+        column = sections[target]["leftColumn"] = []
+    for field in added:
+        json_prop, ui_field = _property_pair(field, field.key)
+        ui_field["parent"] = target
+        properties[field.key] = json_prop
+        ui_fields[field.key] = ui_field
+        column.append({"name": field.key, "type": "field"})
+    return MergeResult(schema=schema, added=added, removed_by_site=removed_by_site)
+
+
+def _section_for_added_fields(json_part: dict, sections: dict, order: List[str]) -> Optional[str]:
+    """The last section in ``order`` that always shows: active, and not the
+    target of a condition (an ``allOf`` entry's ``x-section``)."""
+    conditional = {c.get("x-section") for c in json_part.get("allOf") or [] if isinstance(c, dict)}
+    for section_id in reversed(order):
+        section = sections.get(section_id)
+        if isinstance(section, dict) and section.get("isActive", True) and section_id not in conditional:
+            return section_id
+    return None

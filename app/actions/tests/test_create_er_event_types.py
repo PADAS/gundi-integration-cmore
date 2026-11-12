@@ -95,6 +95,16 @@ def mock_er_admin(mocker):
     return er
 
 
+@pytest.fixture(autouse=True)
+def mock_state(mocker):
+    """The record of the CMORE fields each generated type was built with."""
+    state = MagicMock()
+    state.get_state = AsyncMock(return_value={})
+    state.set_state = AsyncMock()
+    mocker.patch("app.actions.handlers.state_manager", state)
+    return state
+
+
 @pytest.fixture
 def mock_cmore(mocker):
     instance = MagicMock()
@@ -343,7 +353,7 @@ async def test_dry_run_builds_but_writes_nothing(integration, mock_gundi, mock_e
     et = result["event_types"][0]
     assert et["value"] == "cmore_7932_20_evidence_of_poacher" and et["action"] == "created"
     assert et["fields"] == 5  # six CMORE fields minus Reported By
-    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT, "updated": 0, "deactivated": 0}
+    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT}
     assert _write_calls(mock_er_admin) == 0
 
 
@@ -360,7 +370,7 @@ async def test_first_run_creates_category_type_and_choices(integration, mock_gun
     assert all(c.args[0]["field"] == "f261_evidence_type" for c in mock_er_admin.post_choice.await_args_list)
     mock_er_admin.patch_event_type.assert_not_awaited()
     assert result["category"]["action"] == "created"
-    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT, "updated": 0, "deactivated": 0}
+    assert result["choices"] == {"created": EVIDENCE_TYPE_OPTION_COUNT}
 
 
 @pytest.mark.asyncio
@@ -372,7 +382,11 @@ async def test_share_group_label_names_the_category(integration, mock_gundi, moc
 
 
 @pytest.mark.asyncio
-async def test_second_run_patches_the_existing_type_and_leaves_choices(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+async def test_second_run_keeps_the_existing_field_and_adds_the_new_ones(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log):
+    """A type made before field records existed: what is on the site is the
+    known set, its field stays as the site has it, the CMORE fields it lacks
+    are added, and only the schema is sent (name, category, active state
+    are the reserve's)."""
     from app.datasource.er_event_types import slugify
 
     mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
@@ -387,13 +401,284 @@ async def test_second_run_patches_the_existing_type_and_leaves_choices(integrati
     result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
     mock_er_admin.post_event_type.assert_not_awaited()
     value, payload = mock_er_admin.patch_event_type.await_args.args
-    assert value == "cmore_7932_20_old_name" and payload["value"] == "cmore_7932_20_old_name"
-    assert "f261_old_key" in payload["schema"]["json"]["properties"]
-    assert "f261_evidence_type" not in payload["schema"]["json"]["properties"]
+    assert value == "cmore_7932_20_old_name"
+    assert set(payload) == {"schema"}
+    props = payload["schema"]["json"]["properties"]
+    assert props["f261_old_key"] == {"type": "string"}  # untouched
+    assert "f261_evidence_type" not in props
+    assert {"f262_cas_number", "f263_evidence_bag_no", "f264_number_of_snares_found", "f265_sap_13"} <= set(props)
     mock_er_admin.get_choices.assert_awaited_once_with("f261_old_key")
     assert mock_er_admin.post_choice.await_count == 0 and mock_er_admin.patch_choice.await_count == 0
-    assert result["event_types"][0]["action"] == "updated"
-    assert result["choices"] == {"created": 0, "updated": 0, "deactivated": 0}
+    et = result["event_types"][0]
+    assert et["action"] == "updated"
+    assert et["added_fields"] == ["CAS Number", "Evidence Bag No", "Number of Snares Found", "SAP 13"]
+    assert result["choices"] == {"created": 0}
+
+
+def _edited_type():
+    """Evidence of Poacher as a reserve left it: renamed, a shortened field
+    title, a hidden field, a field of their own, CAS Number deleted."""
+    return {
+        "value": "cmore_7932_20_evidence_of_poacher",
+        "display": "Evidence (short)",
+        "category": "cmore_7932",
+        "is_active": True,
+        "schema": {
+            "json": {"properties": {
+                "f261_evidence_type": {"type": "array", "title": "Evidence", "deprecated": False},
+                "f263_evidence_bag_no": {"type": "string", "title": "Bag", "deprecated": True},
+                "f264_number_of_snares_found": {"type": "number", "title": "Snares", "deprecated": False},
+                "f265_sap_13": {"type": "string", "title": "SAP 13", "deprecated": False},
+                "ranger_notes": {"type": "string", "title": "Ranger notes", "deprecated": False},
+            }, "required": []},
+            "ui": {"fields": {}, "order": ["section-1"], "headers": {},
+                   "sections": {"section-1": {"label": "Evidence", "leftColumn": [], "rightColumn": []}}},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_rerun_with_nothing_new_leaves_the_edited_type_alone(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """Every CMORE field is on the site or was deleted there (it is in the
+    record), so nothing is written to the type at all."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_edited_type()]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    mock_er_admin.post_event_type.assert_not_awaited()
+    mock_state.get_state.assert_awaited_with(
+        integration_id=str(integration.id), action_id="create_er_event_types",
+        source_id="https://site.pamdas.org|cmore_7932_20_evidence_of_poacher",
+    )
+    et = result["event_types"][0]
+    assert et["action"] == "unchanged"
+    assert et["added_fields"] == []
+    assert et["removed_by_site"] == ["CAS Number"]
+
+
+@pytest.mark.asyncio
+async def test_rerun_adds_a_field_new_in_cmore_and_keeps_every_edit(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    del site["schema"]["json"]["properties"]["f265_sap_13"]
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264]}  # 265 is new in CMORE
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    value, payload = mock_er_admin.patch_event_type.await_args.args
+    assert value == "cmore_7932_20_evidence_of_poacher" and set(payload) == {"schema"}
+    props = payload["schema"]["json"]["properties"]
+    for key in ("f261_evidence_type", "f263_evidence_bag_no", "f264_number_of_snares_found", "ranger_notes"):
+        assert props[key] == site["schema"]["json"]["properties"][key]
+    assert "f262_cas_number" not in props
+    assert props["f265_sap_13"]["title"] == "SAP 13"
+    assert result["event_types"][0]["added_fields"] == ["SAP 13"]
+    assert result["event_types"][0]["removed_by_site"] == ["CAS Number"]
+
+
+@pytest.mark.asyncio
+async def test_rerun_only_adds_choices_and_reports_stale_ones(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """Reworded or reordered options stay as the site has them; options CMORE
+    added are created; an option CMORE no longer offers is reported, not
+    deactivated."""
+    from app.datasource.er_event_types import slugify
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_edited_type()]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+    tag = next(t for t in RAW_TAGS[0]["tags"] if t["id"] == 20)
+    lookups = next(f for f in tag["fields"] if f["id"] == 261)["lookups"]
+    site_choices = [
+        {"id": str(i), "value": slugify(lk["value"]), "display": "short " + str(i), "is_active": True, "ordernum": 100 - i}
+        for i, lk in enumerate(lookups[1:])  # the first CMORE option is new to the site
+    ] + [{"id": "x", "value": "site_only_option", "display": "Ours", "is_active": True, "ordernum": 1}]
+    mock_er_admin.get_choices.return_value = site_choices
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_choice.assert_not_awaited()
+    assert mock_er_admin.post_choice.await_count == 1
+    assert mock_er_admin.post_choice.await_args.args[0]["value"] == slugify(lookups[0]["value"])
+    assert result["choices"] == {"created": 1}
+    assert result["event_types"][0]["stale_options"] == {"f261_evidence_type": ["site_only_option"]}
+
+
+@pytest.mark.asyncio
+async def test_the_record_of_generated_fields_is_written_after_a_run_not_a_preview(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"], dry_run=True))
+    mock_state.set_state.assert_not_awaited()
+
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+    mock_state.set_state.assert_awaited_once_with(
+        integration_id=str(integration.id), action_id="create_er_event_types",
+        source_id="https://site.pamdas.org|cmore_7932_20_evidence_of_poacher", state={"field_ids": [261, 262, 263, 264, 265]},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schema", [None, "not json", {}, {"json": "{}"}, {"json": {"properties": "x"}},
+                                    {"json": {"properties": {"f261_evidence_type": {}}}, "ui": None}])
+async def test_rerun_skips_a_type_whose_schema_cannot_be_read(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state, schema):
+    """With no readable schema every CMORE field would look new, and the
+    update would replace the reserve's whole form. Skip the type instead."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"] = schema
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    mock_er_admin.post_event_type.assert_not_awaited()
+    mock_er_admin.post_choice.assert_not_awaited()
+    mock_state.set_state.assert_not_awaited()
+    et = result["event_types"][0]
+    assert et["value"] == "cmore_7932_20_evidence_of_poacher"
+    assert et["action"] == "skipped_schema_unreadable"
+    assert et["added_fields"] == []
+    assert mock_er_admin.get_event_types.return_value[0]["schema"] == schema  # the listing is not modified
+
+
+@pytest.mark.asyncio
+async def test_rerun_on_a_form_the_reserve_emptied_is_unchanged_not_skipped(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """Every generated field deleted, all of them in the record: a readable
+    form with nothing to add, so the type is reported unchanged and a field
+    CMORE adds later would still go in."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"] = {"json": {"properties": {}}, "ui": {}}
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    et = result["event_types"][0]
+    assert et["action"] == "unchanged"
+    assert et["removed_by_site"] == ["Evidence Type", "CAS Number", "Evidence Bag No", "Number of Snares Found", "SAP 13"]
+
+
+@pytest.mark.asyncio
+async def test_rerun_keeps_syncing_options_of_a_field_moved_into_a_conditional_section(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """EarthRanger moves a conditional section's fields into allOf[].then.
+    The field is still on the site: not added again, not reported removed,
+    and its options are still compared."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    evidence = site["schema"]["json"]["properties"].pop("f261_evidence_type")
+    site["schema"]["json"]["allOf"] = [{"if": {}, "then": {"properties": {"f261_evidence_type": evidence}}, "x-section": "section-2"}]
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265]}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.patch_event_type.assert_not_awaited()
+    mock_er_admin.get_choices.assert_any_await("f261_evidence_type")
+    et = result["event_types"][0]
+    assert et["action"] == "unchanged" and et["removed_by_site"] == ["CAS Number"]
+
+
+@pytest.mark.asyncio
+async def test_options_of_a_lookup_cmore_dropped_are_all_reported_stale(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """The site still has the dropdown; CMORE has no field for it, so every
+    active option it offers delivers nothing."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"]["json"]["properties"]["f900_old_lookup"] = {"type": "string", "title": "Old lookup"}
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265, 900]}
+    mock_er_admin.get_choices.side_effect = lambda key: (
+        [{"id": "1", "value": "gone", "display": "Gone", "is_active": True, "ordernum": 1},
+         {"id": "2", "value": "off", "display": "Off", "is_active": False, "ordernum": 2}] if key == "f900_old_lookup" else []
+    )
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    assert all(c.args[0]["field"] != "f900_old_lookup" for c in mock_er_admin.post_choice.await_args_list)
+    assert result["event_types"][0]["stale_options"]["f900_old_lookup"] == ["gone"]
+
+
+@pytest.mark.asyncio
+async def test_the_record_is_written_before_the_choices_so_a_choice_failure_keeps_it(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    import httpx
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    request = httpx.Request("POST", "https://site.pamdas.org/api/v1.0/choices/")
+    mock_er_admin.post_choice.side_effect = httpx.HTTPStatusError("boom", request=request, response=httpx.Response(500, request=request))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    mock_er_admin.post_event_type.assert_awaited_once()
+    mock_state.set_state.assert_awaited_once()
+    assert mock_state.set_state.await_args.kwargs["state"] == {"field_ids": [261, 262, 263, 264, 265]}
+
+
+@pytest.mark.asyncio
+async def test_rerun_adds_the_first_fields_to_a_type_generated_with_none(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """The record says the type was built with no fields. That is a record,
+    not a missing one: no warning, and CMORE's first fields are added."""
+    from gundi_core.schemas.v2 import LogLevel
+
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    site = _edited_type()
+    site["schema"] = {"json": {"properties": {}}, "ui": {}}
+    mock_er_admin.get_event_types.return_value = [site]
+    mock_state.get_state.return_value = {"field_ids": []}
+
+    result = await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    value, payload = mock_er_admin.patch_event_type.await_args.args
+    assert value == "cmore_7932_20_evidence_of_poacher"
+    assert {"f261_evidence_type", "f265_sap_13"} <= set(payload["schema"]["json"]["properties"])
+    et = result["event_types"][0]
+    assert et["action"] == "updated" and et["removed_by_site"] == []
+    assert not any("no record" in c.kwargs["title"] for c in activity_log.await_args_list if c.kwargs.get("level") == LogLevel.WARNING)
+
+
+@pytest.mark.asyncio
+async def test_rerun_without_a_record_warns_that_it_trusts_the_site(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """No record (a type from before records, or lost state): the fields
+    on the site are taken as the known set, and the operator is told."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_edited_type()]
+    mock_state.get_state.return_value = {}
+    from gundi_core.schemas.v2 import LogLevel
+
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    warnings = [c.kwargs for c in activity_log.await_args_list if c.kwargs.get("level") == LogLevel.WARNING]
+    assert any("no record" in w["title"] for w in warnings), [w["title"] for w in warnings]
+    assert mock_er_admin.patch_event_type.await_args.args[1]["schema"]["json"]["properties"].keys() >= {"f262_cas_number"}
+
+
+@pytest.mark.asyncio
+async def test_the_record_keeps_fields_cmore_has_since_dropped(integration, mock_gundi, mock_er_admin, mock_cmore, activity_log, mock_state):
+    """A field the reserve deleted stays known even while CMORE drops it, so
+    it does not come back if CMORE restores it later."""
+    mock_er_admin.get_event_categories.return_value = [{"value": "cmore_7932", "display": "CMORE group 7932"}]
+    mock_er_admin.get_me.return_value = {"username": "ingest", "permissions": dict(CATEGORY_PERMISSIONS)}
+    mock_er_admin.get_event_types.return_value = [_edited_type()]
+    mock_state.get_state.return_value = {"field_ids": [261, 262, 263, 264, 265, 999]}
+
+    await action_create_er_event_types(integration, CreateErEventTypesConfig(tags=["20"]))
+
+    assert mock_state.set_state.await_args.kwargs["state"] == {"field_ids": [261, 262, 263, 264, 265, 999]}
 
 
 @pytest.mark.asyncio
