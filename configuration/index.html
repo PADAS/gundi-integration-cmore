@@ -578,6 +578,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#re-runs-keep-the-reserves-edits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-runs keep the reserve's edits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#field-translation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -638,6 +649,33 @@
     
   
     Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
   
 
     
@@ -1008,9 +1046,50 @@ EarthRanger.</p>
 can serve several CMORE share groups: each CMORE integration delivers only
 the types that carry <em>its</em> group and skips the others as unmapped. The slug
 is cosmetic; on a re-run existing objects are matched by the id prefix, so a
-CMORE rename updates the display name but never creates a second type or
-field. Nothing in EarthRanger is ever deleted: deselected tags are left
-alone and dropped options are deactivated.</p>
+CMORE rename never creates a second type or field.</p>
+<h3 id="re-runs-keep-the-reserves-edits">Re-runs keep the reserve's edits<a class="headerlink" href="#re-runs-keep-the-reserves-edits" title="Permanent link">&para;</a></h3>
+<p>Once a generated type exists, it belongs to the reserve. A re-run only adds
+what is new in CMORE and changes nothing already on the site:</p>
+<ul>
+<li><strong>Kept as the site has it:</strong> the type's name, category and active state;
+  every field's title, hidden (deprecated) state and position, including a
+  generated field moved into a conditional section; sections and their
+  conditions; required fields; the form's validation settings; fields the reserve added for EarthRanger
+  only; and every dropdown option's wording, order and active state.</li>
+<li><strong>Added:</strong> a CMORE property the type has never had becomes a new field at
+  the end of the last section that always shows (switched on, with no
+  condition). If no section always shows, it goes in a section called "New
+  from CMORE". An added field is never made required, even if CMORE requires
+  it; make it required yourself if you want. A new CMORE option is added to
+  its list.</li>
+<li><strong>Skipped:</strong> if a type's form in EarthRanger cannot be read, or has no
+  fields and Gundi has no record of it, the run leaves that type alone,
+  reports it as <code>skipped_schema_unreadable</code> and logs a warning, rather than
+  replace the form.</li>
+<li><strong>Not brought back:</strong> a generated field the reserve deleted stays deleted.
+  Gundi records which CMORE fields each type was built with, so a missing
+  field it built before is treated as removed on purpose. Types created
+  before this record existed (before November 2026) have none yet, so their
+  first re-run restores a deleted field once. The record keeps fields CMORE
+  has since dropped, so a deleted field stays deleted if CMORE restores it.</li>
+<li><strong>Reported, not changed:</strong> an active option CMORE does not offer, whether
+  CMORE removed it or the reserve added it, stays on the site and is listed
+  under <code>stale_options</code> in the result; so is every active option of a
+  generated dropdown whose CMORE property no longer exists. Rangers can
+  still pick it, but CMORE does not know it, so the field arrives in CMORE
+  empty, with only a warning in the runner log. <strong>Check
+  <code>stale_options</code> after every run</strong> and switch each listed option off in
+  EarthRanger, or map it to its replacement (see
+  <a href="../troubleshooting/#a-dropdown-value-arrives-in-cmore-empty">Troubleshooting</a>).
+  Nothing in EarthRanger is ever deleted or deactivated, and deselected tags
+  are left alone.</li>
+<li><strong>Not renamed:</strong> a tag or property renamed in CMORE keeps its old name on
+  the site. Delivery matches on ids, so it is unaffected.</li>
+</ul>
+<p>What the reserve must not change is a field's key (<code>f&lt;fieldid&gt;_…</code>) or an
+option's stored value: delivery matches on those, not on titles. The result
+of each run lists <code>added_fields</code>, <code>removed_by_site</code> and <code>stale_options</code> per
+type, and Preview only shows them before anything is written.</p>
 <h3 id="field-translation">Field translation<a class="headerlink" href="#field-translation" title="Permanent link">&para;</a></h3>
 <table>
 <thead>

@@ -14,6 +14,8 @@
         <link rel="prev" href="../configuration/">
       
       
+        <link rel="next" href="../changelog/">
+      
       
         
       
@@ -407,6 +409,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-dropdown-value-arrives-in-cmore-empty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A dropdown value arrives in CMORE empty
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#an-event-is-skipped-as-unmapped" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -546,6 +559,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -604,6 +644,19 @@ The source value didn't resolve to a valid CMORE option. Add a <strong>value map
 <a href="../configuration/#how-field-values-are-resolved">Configuration → value resolution</a>.
 The <a href="../configuration/#scaffolding-mappings-cli-alternative"><code>scaffold-mapping</code></a> tool surfaces
 these to fill in.</p>
+<h2 id="a-dropdown-value-arrives-in-cmore-empty">A dropdown value arrives in CMORE empty<a class="headerlink" href="#a-dropdown-value-arrives-in-cmore-empty" title="Permanent link">&para;</a></h2>
+<p>The event reaches CMORE, but one dropdown field on it is blank, and the runner
+log shows the value was dropped (as above). On a generated event type, the
+usual cause is an option CMORE has since removed: re-runs of <em>Create
+EarthRanger event types</em> keep the reserve's options and never switch one off,
+so rangers can still pick it.</p>
+<ol>
+<li>Run <em>Create EarthRanger event types</em> with <strong>Preview</strong> on and look at
+   <code>stale_options</code> in the result. It lists, by field, each active option
+   CMORE does not offer: removed in CMORE, or added on the site.</li>
+<li>For each one, either switch the option off in EarthRanger, or add a value
+   mapping from it to the CMORE option that replaced it.</li>
+</ol>
 <h2 id="an-event-is-skipped-as-unmapped">An event is skipped as unmapped<a class="headerlink" href="#an-event-is-skipped-as-unmapped" title="Permanent link">&para;</a></h2>
 <p>Activity log entry (Gundi portal → the CMORE connection → Activity), at
 <code>WARNING</code>:</p>
